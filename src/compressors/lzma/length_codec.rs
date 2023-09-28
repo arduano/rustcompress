@@ -1,7 +1,4 @@
-use std::{
-    array,
-    io::{self, Read, Write},
-};
+use std::io::{self, Read, Write};
 
 use crate::utils::const_variable_arr::ConstVariableArr;
 

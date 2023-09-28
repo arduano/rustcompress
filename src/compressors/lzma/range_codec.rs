@@ -1,8 +1,8 @@
 mod price;
 mod probability;
 
-pub use probability::*;
 pub use price::*;
+pub use probability::*;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 

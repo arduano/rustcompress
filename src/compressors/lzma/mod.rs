@@ -1,5 +1,5 @@
-pub mod range_codec;
 pub mod length_codec;
+pub mod range_codec;
 
 // private static readonly byte[] G_FAST_POS = new byte[1 << 11];
 
