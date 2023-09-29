@@ -1,3 +1,1 @@
-pub struct LiteralsEncoder {
-    
-}
+pub struct LiteralsEncoder {}

@@ -3,38 +3,34 @@ const HASH2_MASK: u32 = HASH2_SIZE - 1;
 const HASH3_SIZE: u32 = 1 << 16;
 const HASH3_MASK: u32 = HASH3_SIZE - 1;
 
-pub struct Hash234 {
-    hash2_table: Vec<u32>,
-    hash3_table: Vec<u32>,
-    hash4_table: Vec<u32>,
+pub struct Hash234<T>
+where
+    T: Default + Copy,
+{
+    hash2_table: Vec<T>,
+    hash3_table: Vec<T>,
+    hash4_table: Vec<T>,
 
     hash4_mask: u32, // Purely used for performance, to get faster modulo over the hash4 table size
 }
 
 // TODO: Convert this to a "hash entry" that mutably borrows the hash table
 pub struct HashIndex {
-    hash2_pos: u32,
-    hash3_pos: u32,
-    hash4_pos: u32,
+    hash2_pos: usize,
+    hash3_pos: usize,
+    hash4_pos: usize,
 }
 
-pub struct HashValues {
-    pub hash2_value: u32,
-    pub hash3_value: u32,
-    pub hash4_value: u32,
+pub struct HashValues<T> {
+    pub hash2_value: T,
+    pub hash3_value: T,
+    pub hash4_value: T,
 }
 
-fn subtract_positions(positions: &mut [u32], norm_offset: u32) {
-    for p in positions {
-        if *p <= norm_offset {
-            *p = 0;
-        } else {
-            *p = *p - norm_offset;
-        }
-    }
-}
-
-impl Hash234 {
+impl<T> Hash234<T>
+where
+    T: Default + Copy,
+{
     /// Altered version of the get_hash4_size() function from various LZMA ports (not the original LZMA code)
     ///
     /// ... \
@@ -65,18 +61,19 @@ impl Hash234 {
     }
 
     // TODO: Check this, why is it dividing by 1024 and then by 4? Why is it adding 4? Is it counting the number of u32s?
+    // Also, I added T as the type argument, is the size of T relevant to this calculation?
     pub fn get_mem_usage(dict_size: u32) -> u32 {
         (HASH2_MASK + HASH2_SIZE + Self::get_hash4_size(dict_size)) / (1024 / 4) + 4
     }
 
     pub fn new(dict_size: u32) -> Self {
-        let hash2_table = vec![0; HASH2_SIZE as _];
+        let hash2_table = vec![Default::default(); HASH2_SIZE as _];
 
-        let hash3_table = vec![0; HASH3_SIZE as _];
+        let hash3_table = vec![Default::default(); HASH3_SIZE as _];
 
         let hash4_size = Self::get_hash4_size(dict_size);
         let hash4_mask = hash4_size - 1;
-        let hash4_table = vec![0; hash4_size as _];
+        let hash4_table = vec![Default::default(); hash4_size as _];
 
         Self {
             hash4_mask,
@@ -86,45 +83,45 @@ impl Hash234 {
         }
     }
 
-    pub fn calc_hash_index(&mut self, buf: &[u8]) -> HashIndex {
-        let hash = CRC_TABLE[buf[0] as usize] ^ (buf[1] as u32);
+    #[inline(always)]
+    pub fn calc_hash_index(&mut self, next_bytes: [u8; 4]) -> HashIndex {
+        let hash = CRC_TABLE[next_bytes[0] as usize] ^ (next_bytes[1] as u32);
         let hash2_value = (hash & HASH2_MASK) as i32; // & for faster modulo
 
-        let hash = hash ^ ((buf[2] as u32) << 8);
+        let hash = hash ^ ((next_bytes[2] as u32) << 8);
         let hash3_value = (hash & HASH3_MASK) as i32; // & for faster modulo
 
-        let hash = hash ^ CRC_TABLE[buf[3] as usize] << 5;
+        let hash = hash ^ CRC_TABLE[next_bytes[3] as usize] << 5;
         let hash4_value = (hash & self.hash4_mask) as i32; // & for faster modulo
 
         HashIndex {
-            hash2_pos: hash2_value as u32,
-            hash3_pos: hash3_value as u32,
-            hash4_pos: hash4_value as u32,
+            hash2_pos: hash2_value as usize,
+            hash3_pos: hash3_value as usize,
+            hash4_pos: hash4_value as usize,
         }
     }
 
-    pub fn get_hash_values(&self, index: &HashIndex) -> HashValues {
+    #[inline(always)]
+    pub fn get_table_values(&self, index: &HashIndex) -> HashValues<T> {
         HashValues {
-            hash2_value: self.hash2_table[index.hash2_pos as usize],
-            hash3_value: self.hash3_table[index.hash3_pos as usize],
-            hash4_value: self.hash4_table[index.hash4_pos as usize],
+            hash2_value: self.hash2_table[index.hash2_pos],
+            hash3_value: self.hash3_table[index.hash3_pos],
+            hash4_value: self.hash4_table[index.hash4_pos],
         }
     }
 
-    pub fn update_tables(&mut self, index: &HashIndex, pos: u32) {
+    #[inline(always)]
+    pub fn update_tables(&mut self, index: &HashIndex, pos: T) {
         self.hash2_table[index.hash2_pos as usize] = pos;
         self.hash3_table[index.hash3_pos as usize] = pos;
         self.hash4_table[index.hash4_pos as usize] = pos;
     }
 
-    /// Function to decrement all the values in the hash table downwards,
-    /// avoiding overflowing the integer limit.
-    ///
-    /// This function should only be called once the indexes get dangerously high relative to the integer limit.
-    pub fn subtract_all_values_by(&mut self, by: u32) {
-        subtract_positions(&mut self.hash2_table, by);
-        subtract_positions(&mut self.hash3_table, by);
-        subtract_positions(&mut self.hash4_table, by);
+    pub fn map_all_values(&mut self, f: impl Fn(&mut T) -> T) {
+        let mut f = move |x: &mut T| *x = f(x);
+        self.hash2_table.iter_mut().for_each(&mut f);
+        self.hash3_table.iter_mut().for_each(&mut f);
+        self.hash4_table.iter_mut().for_each(&mut f);
     }
 }
 
