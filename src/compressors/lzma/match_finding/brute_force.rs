@@ -4,12 +4,6 @@
 //! This is mainly used for testing to ensure that the more complex match finders are
 //! working correctly.
 
-use super::utils::{
-    cyclic_vec::CyclicVec,
-    hash234::Hash234,
-    lz_encoder_input_buffer::LZEncoderData,
-    match_positions::{MatchPos, MatchReadPos, PosIncrementResult},
-};
 use super::{Match, MatchFinder, MatchInputBuffer};
 
 pub struct BruteForceMatchFinder {
@@ -56,7 +50,7 @@ impl MatchFinder for BruteForceMatchFinder {
         }
     }
 
-    fn skip_byte(&mut self, buffer: &impl MatchInputBuffer) {
+    fn skip_byte(&mut self, _buffer: &impl MatchInputBuffer) {
         // N/A
     }
 }

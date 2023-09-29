@@ -1,5 +1,3 @@
-use self::utils::lz_encoder_input_buffer::LZEncoderData;
-
 pub mod brute_force;
 pub mod hc4;
 pub mod utils;

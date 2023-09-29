@@ -1,7 +1,6 @@
 use super::utils::{
     cyclic_vec::CyclicVec,
     hash234::Hash234,
-    lz_encoder_input_buffer::LZEncoderData,
     match_positions::{MatchPos, MatchReadPos, PosIncrementResult},
 };
 use super::{Match, MatchFinder, MatchInputBuffer};
