@@ -279,6 +279,10 @@ impl LengthCodecEncoder {
         Ok(())
     }
 
+    pub fn get_price(&self, len: usize, pos_state: usize) -> RangeEncPrice {
+        self.pos_state_prices[pos_state].prices[len - MATCH_LEN_MIN]
+    }
+
     /// Update the prices of all pos_states that have counted down to 0.
     /// We count every time we encode a length for that pos_state,
     /// and when we reach 0 we update the prices.

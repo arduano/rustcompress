@@ -1,3 +1,21 @@
+//! # Range Encoding and Decoding for LZMA
+//!
+//! ### Range Encoding
+//!
+//! Range encoding is a variant of arithmetic encoding that uses two main
+//! variables: `low` and `range`. The `low` variable stores the lower bound
+//! of the current range of the output, and `range` stores the size of the
+//! current range. As each symbol is encoded, `low` and `range` are updated
+//! to narrow down the range of possible output values. The most probable
+//! symbols take up a larger portion of this range.
+//!
+//! ### Probability Modeling
+//!
+//! This implementation utilizes `RangeEncProbability`, an adaptive model
+//! that tracks the occurrence probabilities of symbols. As more symbols
+//! are processed, the model is updated, providing more accurate estimates
+//! for future symbols.
+
 mod price;
 mod probability;
 
@@ -85,7 +103,7 @@ impl<W: Write> RangeEncoder<W> {
             prob.increment();
         } else {
             // Encode the bit as a 1, and update the probability
-            self.low += (bound & 0xFFFFFFFFu32) as u64;
+            self.low += bound as u64;
             self.range -= bound;
             prob.decrement();
         }
@@ -97,14 +115,14 @@ impl<W: Write> RangeEncoder<W> {
         Ok(())
     }
 
-    #[inline(never)]
     pub fn encode_direct_bits(&mut self, value: u32, mut count: u32) -> std::io::Result<()> {
         loop {
             self.range >>= 1;
             count = count - 1;
 
-            let m = 0u32.wrapping_sub((value >> count) & 1);
-            self.low += (self.range & m) as u64;
+            let bit = (value >> count) & 1;
+            let m = 0u32.wrapping_sub(bit); // 0 or 0xFFFFFFFF
+            self.low += (self.range & m) as u64; // If bit is 0, add 0. If bit is 1, add range
 
             if self.range & TOP_MASK == 0 {
                 self.range = self.range << SHIFT_BITS;
@@ -164,6 +182,7 @@ impl<R: Read> RangeDecoder<R> {
         Ok(())
     }
 
+    /// Decode a bit with a given probability
     pub fn decode_bit(&mut self, prob: &mut RangeEncProbability) -> Result<u32> {
         self.normalize()?;
         let bound = (self.range >> (BIT_MODEL_TOTAL_BITS as u32)) * prob.0 as u32;
@@ -181,15 +200,20 @@ impl<R: Read> RangeDecoder<R> {
         }
     }
 
+    /// Decode bits assuming the probability is 50/50
     pub fn decode_direct_bits(&mut self, count: u32) -> Result<i32> {
         let mut result = 0;
         for _ in 0..count {
             self.normalize()?;
 
             self.range >>= 1;
-            let t = (self.code.wrapping_sub(self.range)) >> 31;
-            self.code -= self.range & (t.wrapping_sub(1));
-            result = (result << 1) | (1u32.wrapping_sub(t));
+
+            let t = (self.code.wrapping_sub(self.range)) >> 31; // 0 or 1
+            self.code -= self.range & (t.wrapping_sub(1)); // If 0, subtract 0. If 1, subtract range
+            let bit = 1 - t; // Bit is 1 if t is 0, and 0 if t is 1
+
+            // result = (result << 1) | bit;
+            result = (result << 1) | bit;
         }
         Ok(result as _)
     }

@@ -16,6 +16,7 @@ const PRICES: &[u32] = &[
     0x2, 0x2, 0x2, 0x1, 0x1, 0x1, 0x1, 0x1,
 ];
 
+/// The price of encoding a bit or set of bits with a given probability.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct RangeEncPrice(u32);
 
