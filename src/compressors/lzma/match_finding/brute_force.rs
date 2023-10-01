@@ -4,29 +4,37 @@
 //! This is mainly used for testing to ensure that the more complex match finders are
 //! working correctly.
 
-use super::{Match, MatchFinder, MatchInputBuffer};
+use crate::compressors::lzma::encoder_data_buffer::EncoderDataBuffer;
+
+use super::{Match, MatchFinder};
 
 pub struct BruteForceMatchFinder {
     max_match_len: u32,
+    dict_size: u32,
 }
 
 impl BruteForceMatchFinder {
-    pub fn new(max_match_len: u32) -> Self {
-        Self { max_match_len }
+    pub fn new(max_match_len: u32, dict_size: u32) -> Self {
+        Self {
+            max_match_len,
+            dict_size,
+        }
     }
 }
 
 impl MatchFinder for BruteForceMatchFinder {
     fn find_and_write_matches(
         &mut self,
-        buffer: &impl MatchInputBuffer,
+        buffer: &EncoderDataBuffer,
         output_matches_vec: &mut Vec<Match>,
     ) {
         output_matches_vec.clear();
 
-        let read_len = buffer.available_bytes() as usize;
+        let read_len = buffer.available_bytes_forward() as usize;
 
-        let start = -(buffer.tail_bytes() as i32);
+        let dict_size = self.dict_size.min(buffer.available_bytes_back());
+
+        let start = -(dict_size as i32);
         for i in start..0 {
             if buffer.get_byte(i) != buffer.get_byte(0) {
                 continue;
@@ -50,7 +58,7 @@ impl MatchFinder for BruteForceMatchFinder {
         }
     }
 
-    fn skip_byte(&mut self, _buffer: &impl MatchInputBuffer) {
+    fn skip_byte(&mut self, _buffer: &EncoderDataBuffer) {
         // N/A
     }
 }

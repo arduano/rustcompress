@@ -1,9 +1,11 @@
+use crate::compressors::lzma::encoder_data_buffer::EncoderDataBuffer;
+
 use super::utils::{
     cyclic_vec::CyclicVec,
     hash234::Hash234,
     match_positions::{MatchPos, MatchReadPos, PosIncrementResult},
 };
-use super::{Match, MatchFinder, MatchInputBuffer};
+use super::{Match, MatchFinder};
 
 pub struct HC4MatchFinder {
     hash: Hash234<MatchPos>,
@@ -16,7 +18,7 @@ pub struct HC4MatchFinder {
     lz_pos: MatchReadPos,
 }
 
-fn get_next_4_bytes(buffer: &impl MatchInputBuffer) -> [u8; 4] {
+fn get_next_4_bytes(buffer: &EncoderDataBuffer) -> [u8; 4] {
     [
         buffer.get_byte(0),
         buffer.get_byte(1),
@@ -26,8 +28,9 @@ fn get_next_4_bytes(buffer: &impl MatchInputBuffer) -> [u8; 4] {
 }
 
 impl HC4MatchFinder {
-    pub fn get_mem_usage(dict_size: u32) -> u32 {
-        Hash234::<MatchPos>::get_mem_usage(dict_size) + dict_size / (1024 / 4) + 10
+    pub fn get_mem_usage(dict_size: u32) -> u64 {
+        Hash234::<MatchPos>::get_mem_usage(dict_size)
+            + dict_size as u64 * std::mem::size_of::<MatchPos>() as u64
     }
 
     pub fn new(dict_size: u32, nice_len: u32, max_match_len: u32, depth_limit: i32) -> Self {
@@ -46,8 +49,8 @@ impl HC4MatchFinder {
         }
     }
 
-    fn increment_pos(&mut self, buffer: &impl MatchInputBuffer) {
-        if buffer.available_bytes() != 0 {
+    fn increment_pos(&mut self, buffer: &EncoderDataBuffer) {
+        if buffer.available_bytes_forward() != 0 {
             let result = self.lz_pos.increment();
 
             if result == PosIncrementResult::ShouldNormalize {
@@ -67,13 +70,13 @@ impl HC4MatchFinder {
 impl MatchFinder for HC4MatchFinder {
     fn find_and_write_matches(
         &mut self,
-        buffer: &impl MatchInputBuffer,
+        buffer: &EncoderDataBuffer,
         output_matches_vec: &mut Vec<Match>,
     ) {
         output_matches_vec.clear();
 
         self.increment_pos(buffer);
-        let avail = buffer.available_bytes() as u32;
+        let avail = buffer.available_bytes_forward() as u32;
 
         let mut max_match_len = self.max_match_len;
         let mut nice_len = self.nice_len;
@@ -96,23 +99,11 @@ impl MatchFinder for HC4MatchFinder {
         let delta3 = self.lz_pos - positions.hash3_value;
         self.chain.push(positions.hash4_value);
 
-        let do_start_bytes_match = |delta: i32| buffer.get_byte(-delta) == buffer.get_byte(0);
-
-        let do_bytes_match = |delta: i32, len: u32| {
-            // dbg!(delta);
-            // dbg!(len);
-            // dbg!(buffer.get_byte(len as i32 - delta));
-            // dbg!(buffer.get_byte(len as i32));
-            buffer.get_byte(len as i32 - delta) == buffer.get_byte(len as i32)
-        };
-
-        // TODO: Find a clean way to clean up all the inline conditions in this function
-
         let mut len_best = 0;
 
         // Check if the byte at the current position matches the byte delta2 positions behind it.
         // If so, update the best match length and add a new match to the output vector.
-        if delta2 < self.chain.len() as i32 && do_start_bytes_match(delta2) {
+        if delta2 < self.chain.len() as i32 && buffer.do_bytes_match(delta2, 0) {
             len_best = 2;
             output_matches_vec.push(Match {
                 distance: delta2 as u32 - 1,
@@ -127,7 +118,7 @@ impl MatchFinder for HC4MatchFinder {
         // Set delta2 to delta3 to check for longer matches in the next iteration.
         if latest_delta != delta3
             && delta3 < self.chain.len() as i32
-            && do_start_bytes_match(delta3)
+            && buffer.do_bytes_match(delta3, 0)
         {
             len_best = 3;
             output_matches_vec.push(Match {
@@ -141,7 +132,8 @@ impl MatchFinder for HC4MatchFinder {
         // If so, increment the best match length until it reaches the match length limit or the bytes no longer match.
         // If the best match length is long enough, return from the function.
         if output_matches_vec.len() > 0 {
-            while len_best + 1 < max_match_len && do_bytes_match(latest_delta, len_best + 1) {
+            while len_best + 1 < max_match_len && buffer.do_bytes_match(latest_delta, len_best + 1)
+            {
                 len_best += 1;
             }
 
@@ -168,7 +160,6 @@ impl MatchFinder for HC4MatchFinder {
 
             let delta = (self.lz_pos - val) as i32;
             if delta < self.chain.len() as i32 {
-                // dbg!(&self.chain);
                 current_match = Some(*self.chain.get_backwards(delta as usize + 1));
             } else {
                 current_match = None;
@@ -187,11 +178,11 @@ impl MatchFinder for HC4MatchFinder {
                 continue;
             }
 
-            if do_bytes_match(delta, len_best) && do_start_bytes_match(delta) {
+            if buffer.do_bytes_match(delta, len_best) && buffer.do_bytes_match(delta, 0) {
                 // Calculate the length of the match.
                 let mut len = 1;
                 while len + 1 < max_match_len {
-                    if !do_bytes_match(delta, len + 1) {
+                    if !buffer.do_bytes_match(delta, len + 1) {
                         break;
                     }
                     len += 1;
@@ -217,8 +208,8 @@ impl MatchFinder for HC4MatchFinder {
         }
     }
 
-    fn skip_byte(&mut self, buffer: &impl MatchInputBuffer) {
-        if buffer.available_bytes() != 0 {
+    fn skip_byte(&mut self, buffer: &EncoderDataBuffer) {
+        if buffer.available_bytes_forward() != 0 {
             let index = self.hash.calc_hash_index(get_next_4_bytes(buffer)); // Grab the guessed indexes for the byte values
             let positions = self.hash.get_table_values(&index); // Get the delta values at those table indexes
             self.hash.update_tables(&index, self.lz_pos.as_match_pos()); // Update the tables with the new position
@@ -234,35 +225,6 @@ mod tests {
     use crate::compressors::lzma::match_finding::brute_force::BruteForceMatchFinder;
 
     use super::*;
-
-    struct DummyBuffer {
-        data: Vec<u8>,
-        pos: i32,
-    }
-
-    impl DummyBuffer {
-        fn new(data: Vec<u8>) -> Self {
-            Self { data, pos: 0 }
-        }
-
-        fn increment_pos(&mut self) {
-            self.pos += 1;
-        }
-    }
-
-    impl MatchInputBuffer for DummyBuffer {
-        fn available_bytes(&self) -> u32 {
-            self.data.len() as u32 - self.pos as u32
-        }
-
-        fn tail_bytes(&self) -> u32 {
-            self.pos as u32
-        }
-
-        fn get_byte(&self, offset: i32) -> u8 {
-            self.data[(self.pos + offset) as usize]
-        }
-    }
 
     fn assert_matches_equal(matches_1: &[Match], matches_2: &[Match]) {
         let mut matches1 = matches_1.to_vec();
@@ -308,16 +270,17 @@ mod tests {
             data.extend(vec![0; 10]); // Space sequences with zeros
         }
 
-        let mut buffer = DummyBuffer::new(data);
-        buffer.pos = 1000; // Skip the padding
+        let mut buffer = EncoderDataBuffer::new(1);
+        buffer.append_data(&data, data.len() as u32);
+        buffer.skip(1000); // Skip the padding
 
         let mut hc4 = HC4MatchFinder::new(998, 5, 5, 10); // max_match_len and nice_len set to allow short matches
-        let mut brute = BruteForceMatchFinder::new(5);
+        let mut brute = BruteForceMatchFinder::new(5, 998);
 
         let mut out_vec_1 = Vec::new();
         let mut out_vec_2 = Vec::new();
 
-        for _ in 0..buffer.available_bytes() - 4 {
+        for _ in 0..buffer.available_bytes_forward() - 4 {
             brute.find_and_write_matches(&buffer, &mut out_vec_2);
             hc4.find_and_write_matches(&buffer, &mut out_vec_1);
 
@@ -344,22 +307,18 @@ mod tests {
             data.extend(vec![0; 10]); // Space sequences with zeros
         }
 
-        dbg!(&data);
-        let mut buffer = DummyBuffer::new(data);
-        buffer.pos = 1000; // Skip the padding
+        let mut buffer = EncoderDataBuffer::new(1);
+        buffer.append_data(&data, data.len() as u32);
+        buffer.skip(1000); // Skip the padding
 
         let mut hc4 = HC4MatchFinder::new(998, 12, 12, 20); // max_match_len and nice_len set to allow short matches
-        let mut brute = BruteForceMatchFinder::new(12);
+        let mut brute = BruteForceMatchFinder::new(12, 998);
 
         let mut out_vec_1 = Vec::new();
         let mut out_vec_2 = Vec::new();
 
-        for _ in 0..buffer.available_bytes() - 4 {
+        for _ in 0..buffer.available_bytes_forward() - 4 {
             brute.find_and_write_matches(&buffer, &mut out_vec_2);
-
-            if buffer.get_byte(0) == 255 {
-                // dbg!(&out_vec_2);
-            }
 
             hc4.find_and_write_matches(&buffer, &mut out_vec_1);
 

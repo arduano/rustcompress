@@ -1,3 +1,5 @@
+use super::encoder_data_buffer::EncoderDataBuffer;
+
 pub mod brute_force;
 pub mod hc4;
 pub mod utils;
@@ -23,14 +25,8 @@ impl Ord for Match {
 pub trait MatchFinder {
     fn find_and_write_matches(
         &mut self,
-        buffer: &impl MatchInputBuffer,
+        buffer: &EncoderDataBuffer,
         output_matches_vec: &mut Vec<Match>,
     );
-    fn skip_byte(&mut self, buffer: &impl MatchInputBuffer);
-}
-
-pub trait MatchInputBuffer {
-    fn available_bytes(&self) -> u32;
-    fn tail_bytes(&self) -> u32;
-    fn get_byte(&self, offset: i32) -> u8;
+    fn skip_byte(&mut self, buffer: &EncoderDataBuffer);
 }

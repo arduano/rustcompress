@@ -60,10 +60,10 @@ where
         h
     }
 
-    // TODO: Check this, why is it dividing by 1024 and then by 4? Why is it adding 4? Is it counting the number of u32s?
-    // Also, I added T as the type argument, is the size of T relevant to this calculation?
-    pub fn get_mem_usage(dict_size: u32) -> u32 {
-        (HASH2_MASK + HASH2_SIZE + Self::get_hash4_size(dict_size)) / (1024 / 4) + 4
+    /// Get estimated memory usage in bytes
+    pub fn get_mem_usage(dict_size: u32) -> u64 {
+        let arrays_total_len = HASH2_MASK + HASH2_SIZE + Self::get_hash4_size(dict_size);
+        arrays_total_len as u64 * std::mem::size_of::<T>() as u64
     }
 
     pub fn new(dict_size: u32) -> Self {
