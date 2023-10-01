@@ -47,35 +47,6 @@ impl EncoderDataBuffer {
         self.read_pos += 1;
     }
 
-    pub fn projection(&self) -> EncoderDataBufferProjection<'_> {
-        EncoderDataBufferProjection {
-            read_pos: self.read_pos,
-            buf: &self.buf,
-        }
-    }
-
-    pub fn offset_projection(&self, offset: u32) -> EncoderDataBufferProjection<'_> {
-        EncoderDataBufferProjection {
-            read_pos: self.read_pos + offset,
-            buf: &self.buf,
-        }
-    }
-}
-
-pub struct EncoderDataBufferProjection<'a> {
-    read_pos: u32,
-    buf: &'a [u8],
-}
-
-impl<'a> EncoderDataBufferProjection<'a> {
-    pub fn available_bytes_forward(&self) -> u32 {
-        self.buf.len() as u32 - self.read_pos
-    }
-
-    pub fn available_bytes_back(&self) -> u32 {
-        self.buf.len() as u32
-    }
-
     pub fn get_byte(&self, offset: i32) -> u8 {
         debug_assert!(
             (offset + self.read_pos as i32) >= 0,

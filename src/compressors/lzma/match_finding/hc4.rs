@@ -1,4 +1,4 @@
-use crate::compressors::lzma::encoder_data_buffer::EncoderDataBufferProjection;
+use crate::compressors::lzma::encoder_data_buffer::EncoderDataBuffer;
 
 use super::utils::{
     cyclic_vec::CyclicVec,
@@ -18,7 +18,7 @@ pub struct HC4MatchFinder {
     lz_pos: MatchReadPos,
 }
 
-fn get_next_4_bytes(buffer: &EncoderDataBufferProjection) -> [u8; 4] {
+fn get_next_4_bytes(buffer: &EncoderDataBuffer) -> [u8; 4] {
     [
         buffer.get_byte(0),
         buffer.get_byte(1),
@@ -49,7 +49,7 @@ impl HC4MatchFinder {
         }
     }
 
-    fn increment_pos(&mut self, buffer: &EncoderDataBufferProjection) {
+    fn increment_pos(&mut self, buffer: &EncoderDataBuffer) {
         if buffer.available_bytes_forward() != 0 {
             let result = self.lz_pos.increment();
 
@@ -72,7 +72,7 @@ impl MatchFinder for HC4MatchFinder {
 
     fn find_and_write_matches(
         &mut self,
-        buffer: &EncoderDataBufferProjection,
+        buffer: &EncoderDataBuffer,
         output_matches_vec: &mut Vec<Match>,
     ) {
         output_matches_vec.clear();
@@ -210,7 +210,7 @@ impl MatchFinder for HC4MatchFinder {
         }
     }
 
-    fn skip_byte(&mut self, buffer: &EncoderDataBufferProjection) {
+    fn skip_byte(&mut self, buffer: &EncoderDataBuffer) {
         if buffer.available_bytes_forward() != 0 {
             let index = self.hash.calc_hash_index(get_next_4_bytes(buffer)); // Grab the guessed indexes for the byte values
             let positions = self.hash.get_table_values(&index); // Get the delta values at those table indexes
@@ -224,9 +224,7 @@ impl MatchFinder for HC4MatchFinder {
 
 #[cfg(test)]
 mod tests {
-    use crate::compressors::lzma::{
-        encoder_data_buffer::EncoderDataBuffer, match_finding::brute_force::BruteForceMatchFinder,
-    };
+    use crate::compressors::lzma::match_finding::brute_force::BruteForceMatchFinder;
 
     use super::*;
 
@@ -285,12 +283,10 @@ mod tests {
         let mut out_vec_2 = Vec::new();
 
         for _ in 0..buffer.available_bytes_forward() - 4 {
-            let mut proj = buffer.projection();
+            brute.find_and_write_matches(&buffer, &mut out_vec_2);
+            hc4.find_and_write_matches(&buffer, &mut out_vec_1);
 
-            brute.find_and_write_matches(&proj, &mut out_vec_2);
-            hc4.find_and_write_matches(&proj, &mut out_vec_1);
-
-            if proj.get_byte(0) == 255 {
+            if buffer.get_byte(0) == 255 {
                 // If we reach a short match byte, test that the matches are the same
                 assert_matches_equal(&out_vec_1, &out_vec_2);
             }
@@ -324,12 +320,11 @@ mod tests {
         let mut out_vec_2 = Vec::new();
 
         for _ in 0..buffer.available_bytes_forward() - 4 {
-            let mut proj = buffer.projection();
+            brute.find_and_write_matches(&buffer, &mut out_vec_2);
 
-            brute.find_and_write_matches(&proj, &mut out_vec_2);
-            hc4.find_and_write_matches(&proj, &mut out_vec_1);
+            hc4.find_and_write_matches(&buffer, &mut out_vec_1);
 
-            if proj.get_byte(0) == 255 && out_vec_2.len() > 2 {
+            if buffer.get_byte(0) == 255 && out_vec_2.len() > 2 {
                 // If we reach a short match byte, test that the matches are the same
                 assert_matches_equal(&out_vec_1, &out_vec_2);
             }

@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use super::encoder_data_buffer::{EncoderDataBuffer, EncoderDataBufferProjection};
+use super::encoder_data_buffer::EncoderDataBuffer;
 
 pub mod brute_force;
 pub mod hc4;
@@ -29,8 +29,8 @@ pub trait MatchFinder {
 
     fn find_and_write_matches(
         &mut self,
-        buffer: &EncoderDataBufferProjection,
+        buffer: &EncoderDataBuffer,
         output_matches_vec: &mut Vec<Match>,
     );
-    fn skip_byte(&mut self, buffer: &EncoderDataBufferProjection);
+    fn skip_byte(&mut self, buffer: &EncoderDataBuffer);
 }

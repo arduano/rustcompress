@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::compressors::lzma::{
     length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
     match_finding::{Match, MatchFinder},
@@ -11,6 +13,12 @@ pub struct LZMAFastInstructionPicker {
 }
 
 const REPS: usize = 4;
+
+/// Returns true if the distance is shorter than 1/128th of the big distance,
+/// which
+fn is_distance_sufficiently_shorter(small_dist: u32, big_dist: u32) -> bool {
+    small_dist < big_dist / 128
+}
 
 impl LZMAInstructionPicker for LZMAFastInstructionPicker {
     // TODO: Ensure that when this function returns, input gets skipped by the match length - 1
@@ -32,7 +40,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
         let mut best_rep_len = 0;
         let mut best_rep_index = 0;
         for rep in state.reps {
-            let len = input.buffer().projection().get_match_length(rep, avail);
+            let len = input.buffer().get_match_length(rep, avail);
             if len < MATCH_LEN_MIN as u32 {
                 continue;
             }
@@ -53,7 +61,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
         let matches = input.calc_matches();
 
         if matches.len() > 0 {
-            let mut main = *matches.last().unwrap();
+            let main = *matches.last().unwrap();
 
             // If the match is long enough, return it
             if main.len >= self.nice_len as u32 {
@@ -61,6 +69,20 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
                     distance: main.distance + REPS as u32, // TODO: Why are we adding here?
                     len: main.len,
                 });
+            }
+
+            for m in matches[0..matches.len() - 1].iter().rev() {
+                // I'm not sure why this is here, but it's copied from the reference code
+                if main_len != m.len + 1 {
+                    break;
+                }
+
+                if !is_distance_sufficiently_shorter(m.distance as u32, main_dist as u32) {
+                    break;
+                }
+
+                main_len = m.len;
+                main_dist = m.distance;
             }
 
             if main.len == MATCH_LEN_MIN as u32 && main.distance >= 0x80 {
@@ -86,39 +108,43 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
             }
         }
 
-        if main_len < MATCH_LEN_MIN as u32 {
+        if main_len == 0 {
             return None;
         }
 
-        drop(matches); // Ensure that we don't have a previous borrow of matches when we call calc_matches_at_offset
-
         // Get the next match. Test if it is better than the current match.
         // If so, encode the current byte as a literal.
-        let matches = input.calc_matches_at_offset(1);
-        if matches.count > 0 {
-            let new_len = matches.len[matches.count as usize - 1];
-            let new_dist = matches.dist[matches.count as usize - 1];
+        input.increment_pos();
+        let matches = input.calc_matches();
+        if matches.len() > 0 {
+            let next_match = matches.last().unwrap();
 
-            if (new_len >= main_len && new_dist < main_dist)
-                || (new_len == main_len + 1 && !change_pair(main_dist as _, new_dist as _))
-                || new_len > main_len + 1
-                || (new_len + 1 >= main_len
+            // TODO: Break up this monstrosity, and figure out what it's doing
+            // I copied it from the reference code, but I don't understand it
+            if (next_match.len >= main_len && next_match.distance < main_dist)
+                || (next_match.len == main_len + 1
+                    && !is_distance_sufficiently_shorter(main_dist as _, next_match.distance as _))
+                || next_match.len > main_len + 1
+                || (next_match.len + 1 >= main_len
                     && main_len >= MATCH_LEN_MIN as u32 + 1
-                    && change_pair(new_dist as _, main_dist as _))
+                    && is_distance_sufficiently_shorter(next_match.distance as _, main_dist as _))
             {
-                return 1;
+                return None;
             }
         }
 
         let limit = (main_len - 1).max(MATCH_LEN_MIN as _);
-        for rep in 0..REPS {
-            if encoder.lz.get_match_len(encoder.reps[rep], limit as i32) == limit as _ {
-                return 1;
+        for rep in state.reps {
+            // TODO: We are calling get_match_length twice on the same values, can we cache them above?
+            // There's only a constant amount of them.
+            if input.buffer().get_match_length(rep, limit) == limit {
+                return None;
             }
         }
 
-        encoder.data.back = (main_dist + REPS as i32) as _;
-        encoder.skip((main_len - 2) as _);
-        main_len
+        return Some(Match {
+            distance: main_dist + REPS as u32, // TODO: Why are we adding here?
+            len: main_len,
+        });
     }
 }
