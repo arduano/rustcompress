@@ -64,7 +64,7 @@ impl MatchPos {
 
     /// Get the delta relative to the read position.
     /// Return i32 because we get the negative of the delta often
-    pub fn get_delta(&self, read: MatchReadPos) -> i32 {
+    pub fn get_delta(&self, read: MatchReadPos) -> u32 {
         read - *self
     }
 
@@ -86,11 +86,11 @@ impl std::fmt::Debug for MatchPos {
 
 impl std::ops::Sub<MatchPos> for MatchReadPos {
     // Return i32 because we get the negative of the delta often
-    type Output = i32;
+    type Output = u32;
 
     fn sub(self, rhs: MatchPos) -> Self::Output {
         debug_assert!(self.0 >= rhs.0);
 
-        self.0 as i32 - rhs.0 as i32
+        self.0 as u32 - rhs.0 as u32
     }
 }

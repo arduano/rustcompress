@@ -1,4 +1,6 @@
-use super::encoder_data_buffer::EncoderDataBuffer;
+use std::num::NonZeroU32;
+
+use super::encoder_data_buffer::{EncoderDataBuffer, EncoderDataBufferProjection};
 
 pub mod brute_force;
 pub mod hc4;
@@ -23,10 +25,12 @@ impl Ord for Match {
 }
 
 pub trait MatchFinder {
+    const MIN_FORWARDS_BYTES: u32;
+
     fn find_and_write_matches(
         &mut self,
-        buffer: &EncoderDataBuffer,
+        buffer: &EncoderDataBufferProjection,
         output_matches_vec: &mut Vec<Match>,
     );
-    fn skip_byte(&mut self, buffer: &EncoderDataBuffer);
+    fn skip_byte(&mut self, buffer: &EncoderDataBufferProjection);
 }

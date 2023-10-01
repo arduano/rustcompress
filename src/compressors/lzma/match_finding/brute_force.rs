@@ -4,7 +4,9 @@
 //! This is mainly used for testing to ensure that the more complex match finders are
 //! working correctly.
 
-use crate::compressors::lzma::encoder_data_buffer::EncoderDataBuffer;
+use crate::compressors::lzma::encoder_data_buffer::{
+    EncoderDataBuffer, EncoderDataBufferProjection,
+};
 
 use super::{Match, MatchFinder};
 
@@ -23,9 +25,11 @@ impl BruteForceMatchFinder {
 }
 
 impl MatchFinder for BruteForceMatchFinder {
+    const MIN_FORWARDS_BYTES: u32 = 1;
+
     fn find_and_write_matches(
         &mut self,
-        buffer: &EncoderDataBuffer,
+        buffer: &EncoderDataBufferProjection,
         output_matches_vec: &mut Vec<Match>,
     ) {
         output_matches_vec.clear();
@@ -51,14 +55,14 @@ impl MatchFinder for BruteForceMatchFinder {
             if len >= 2 {
                 dbg!(buffer.get_byte(i), buffer.get_byte(0));
                 output_matches_vec.push(Match {
-                    distance: -i as u32 - 1,
-                    len: len as u32,
+                    distance: (-i as u32 - 1).try_into().unwrap(),
+                    len: (len as u32).try_into().unwrap(),
                 });
             }
         }
     }
 
-    fn skip_byte(&mut self, _buffer: &EncoderDataBuffer) {
+    fn skip_byte(&mut self, _buffer: &EncoderDataBufferProjection) {
         // N/A
     }
 }

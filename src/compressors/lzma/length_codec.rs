@@ -146,7 +146,8 @@ const LOW_LENGTH_MAX: usize = 1 << LOW_LENGTH_BITS;
 const MID_LENGTH_MAX: usize = 1 << MID_LENGTH_BITS;
 const HIGH_LENGTH_MAX: usize = 1 << HIGH_LENGTH_BITS;
 
-const MATCH_LEN_MIN: usize = 2;
+pub const MATCH_LEN_MIN: usize = 2;
+pub const MATCH_LEN_MAX: usize = MATCH_LEN_MIN + LOW_LENGTH_MAX + MID_LENGTH_MAX + HIGH_LENGTH_MAX - 1;
 
 const PRICE_UPDATE_INTERVAL: usize = 32;
 
