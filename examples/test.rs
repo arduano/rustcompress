@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use rustcompress::compressors::lzma::range_codec::{RangeDecoder, RangeEncoder};
+use rustcompress::compressors::lzma::codecs::range_codec::{RangeDecoder, RangeEncoder};
 
 fn main() {
     let mut buf = Vec::new();

@@ -1,5 +1,5 @@
 use crate::compressors::lzma::{
-    length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
+    codecs::length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
     match_finding::{Match, MatchFinder},
     LZMACoderState,
 };

@@ -1,9 +1,7 @@
+pub mod codecs;
 pub mod encoder_data_buffer;
 pub mod encoders;
-pub mod length_codec;
-pub mod literals_codec;
 pub mod match_finding;
-pub mod range_codec;
 
 pub enum LzState {}
 
