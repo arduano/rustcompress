@@ -27,7 +27,8 @@ impl RangeEncPrice {
 
     const DIRECT_BIT_PRICE: RangeEncPrice = RangeEncPrice(1 << BIT_PRICE_SHIFT_BITS);
 
-    pub fn get_bit_price(prob: RangeEncProbability, bit: i32) -> RangeEncPrice {
+    pub fn get_bit_price(prob: RangeEncProbability, bit: u32) -> RangeEncPrice {
+        let bit = bit as i32;
         debug_assert!(bit == 0 || bit == 1);
         let i = ((prob.0 as u32) ^ ((-bit) as u32 & (BIT_MODEL_TOTAL - 1))) >> MOVE_REDUCING_BITS;
         RangeEncPrice(PRICES[i as usize])

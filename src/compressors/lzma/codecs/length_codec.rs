@@ -35,7 +35,7 @@ impl<const BITS_EXP: usize> LengthValueCodec<BITS_EXP> {
         debug_assert!(symbol < self.probs.len() as u32);
 
         let mut index = 1;
-        let mut mask = self.probs.len() as u32; // len will always be a power of two
+        let mut mask = BITS_EXP as u32; // len will always be a power of two
         loop {
             mask >>= 1; // Increment by 1 by shifting right
 
@@ -62,7 +62,7 @@ impl<const BITS_EXP: usize> LengthValueCodec<BITS_EXP> {
         debug_assert!(symbol < self.probs.len() as u32);
 
         let mut index = 1u32;
-        let mut symbol = symbol | self.probs.len() as u32;
+        let mut symbol = symbol | BITS_EXP as u32; // Add a 1 bit on the end for easier iteration over the bits
         loop {
             let bit = symbol & 1;
             symbol >>= 1;
@@ -111,7 +111,7 @@ impl<const BITS_EXP: usize> LengthValueCodec<BITS_EXP> {
         loop {
             let bit = symbol & 1;
             symbol >>= 1;
-            price += self.probs[symbol as usize].get_bit_price(bit as i32);
+            price += self.probs[symbol as usize].get_bit_price(bit);
             if symbol == 1 {
                 break;
             }
@@ -126,7 +126,7 @@ impl<const BITS_EXP: usize> LengthValueCodec<BITS_EXP> {
         loop {
             let bit = symbol & 1;
             symbol >>= 1;
-            price += self.probs[symbol as usize].get_bit_price(bit as i32);
+            price += self.probs[index as usize].get_bit_price(bit);
             index = (index << 1) | bit;
             if symbol == 1 {
                 break;
@@ -398,6 +398,29 @@ mod tests {
         let mut decoder = RangeDecoder::new_stream(Cursor::new(buf)).unwrap();
         for i in 0..256 {
             let result = codec.decode_bit_tree(&mut decoder).unwrap();
+            assert_eq!(result, i);
+        }
+
+        assert!(decoder.is_finished());
+    }
+
+    #[test]
+    fn test_length_value_codec_reverse() {
+        let mut buf = Vec::new();
+
+        let mut codec = LengthValueCodec::<256>::new();
+        let mut encoder = RangeEncoder::new(&mut buf);
+        for i in 0..256 {
+            codec.encode_reverse_bit_tree(&mut encoder, i).unwrap();
+        }
+        encoder.finish().unwrap();
+
+        assert_eq!(buf.len(), 266);
+
+        let mut codec = LengthValueCodec::<256>::new();
+        let mut decoder = RangeDecoder::new_stream(Cursor::new(buf)).unwrap();
+        for i in 0..256 {
+            let result = codec.decode_reverse_bit_tree(&mut decoder).unwrap();
             assert_eq!(result, i);
         }
 

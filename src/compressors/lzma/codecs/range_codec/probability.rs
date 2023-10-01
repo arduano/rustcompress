@@ -28,7 +28,7 @@ impl RangeEncProbability {
         self.0 = prob as u16;
     }
 
-    pub fn get_bit_price(self, bit: i32) -> RangeEncPrice {
+    pub fn get_bit_price(self, bit: u32) -> RangeEncPrice {
         RangeEncPrice::get_bit_price(self, bit)
     }
 }

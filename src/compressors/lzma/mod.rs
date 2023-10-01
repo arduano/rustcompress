@@ -20,7 +20,7 @@ const ALIGN_MASK: usize = ALIGN_SIZE - 1;
 pub struct LZMACoderState {
     // pub(crate) pos_mask: u32,
     pub reps: [u32; REPS],
-    pub state: LzState,
+    // pub state: LzState,
     // pub(crate) is_match: [[u16; POS_STATES_MAX]; STATES],
     // pub(crate) is_rep: [u16; STATES],
     // pub(crate) is_rep0: [u16; STATES],
