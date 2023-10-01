@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 
 use self::subcoder::LiteralSubcoder;
 
-use super::range_codec::{RangeDecoder, RangeEncPrice, RangeEncProbability, RangeEncoder};
+use super::range_codec::{RangeDecoder, RangeEncoder};
 
 /// A struct that helps choose the probability set to use for encoding/decoding
 /// the next literal based on the previous uncompressed byte. lp and lc are
