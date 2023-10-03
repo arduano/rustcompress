@@ -1,4 +1,4 @@
-use crate::compressors::lzma::encoder_data_buffer::EncoderDataBuffer;
+use crate::compressors::lzma::data_buffers::EncoderDataBuffer;
 
 use super::utils::{
     cyclic_vec::CyclicVec,

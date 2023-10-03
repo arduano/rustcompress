@@ -1,17 +1,23 @@
 use super::{
-    encoder_data_buffer::EncoderDataBuffer,
+    data_buffers::EncoderDataBuffer,
     match_finding::{Match, MatchFinder},
     LZMACoderState,
 };
 
 mod instructions_fast;
 
+pub enum EncodeInstruction {
+    Literal,
+    Rep { rep_index: usize, len: u32 },
+    Match(Match),
+}
+
 pub trait LZMAInstructionPicker {
     fn get_next_symbol(
         &mut self,
         data: &mut LZMAEncoderInput<impl MatchFinder>,
         state: &LZMACoderState,
-    ) -> Option<Match>;
+    ) -> EncodeInstruction;
 }
 
 pub struct LZMAEncoderInput<M: MatchFinder> {
@@ -32,7 +38,7 @@ impl<M: MatchFinder> LZMAEncoderInput<M> {
 
             // We allow up to 1/4th of the dict to be kept as redundant data before we shift
             // the buffer (which is expensive).
-            buffer: EncoderDataBuffer::new(dict_size / 4),
+            buffer: EncoderDataBuffer::new(dict_size / 4), // TODO: I guessed this value, should be tested
 
             dict_size,
         }

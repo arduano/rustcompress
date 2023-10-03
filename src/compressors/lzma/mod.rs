@@ -1,5 +1,5 @@
 pub mod codecs;
-pub mod encoder_data_buffer;
+pub mod data_buffers;
 pub mod encoders;
 pub mod match_finding;
 

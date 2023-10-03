@@ -348,19 +348,20 @@ impl LengthCodecDecoder {
             codec: LengthCodec::new(pb),
         }
     }
-    pub fn decode(
-        &mut self,
-        dec: &mut RangeDecoder<impl Read>,
-        pos_state: usize,
-    ) -> io::Result<u32> {
+
+    pub fn decode(&mut self, dec: &mut RangeDecoder<impl Read>, pos_state: u32) -> io::Result<u32> {
         if dec.decode_bit(&mut self.codec.first_bit)? == 0 {
-            let l =
-                self.codec.pos_states[pos_state].low.decode_bit_tree(dec)? + MATCH_LEN_MIN as u32;
+            let l = self.codec.pos_states[pos_state as usize]
+                .low
+                .decode_bit_tree(dec)?
+                + MATCH_LEN_MIN as u32;
             return Ok(l);
         }
 
         if dec.decode_bit(&mut self.codec.second_bit)? == 0 {
-            let l = self.codec.pos_states[pos_state].mid.decode_bit_tree(dec)?
+            let l = self.codec.pos_states[pos_state as usize]
+                .mid
+                .decode_bit_tree(dec)?
                 + MATCH_LEN_MIN as u32
                 + LOW_LENGTH_MAX as u32;
 

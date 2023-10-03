@@ -4,13 +4,11 @@ use crate::compressors::lzma::{
     LZMACoderState,
 };
 
-use super::{LZMAEncoderInput, LZMAInstructionPicker};
+use super::{EncodeInstruction, LZMAEncoderInput, LZMAInstructionPicker};
 
 pub struct LZMAFastInstructionPicker {
     nice_len: u32,
 }
-
-const REPS: usize = 4;
 
 /// Returns true if the distance is shorter than 1/128th of the big distance,
 /// which
@@ -24,7 +22,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
         &mut self,
         input: &mut LZMAEncoderInput<impl MatchFinder>,
         state: &LZMACoderState,
-    ) -> Option<Match> {
+    ) -> EncodeInstruction {
         let avail = input
             .buffer()
             .available_bytes_forward()
@@ -32,23 +30,31 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
 
         // If there aren't enough bytes to encode a match, just return None
         if avail < MATCH_LEN_MIN as u32 {
-            return None;
+            return EncodeInstruction::Literal;
         }
+
+        // Cache the lengths as they're used multiple times
+        let rep_lens = state
+            .reps
+            .map(|rep| input.buffer().get_match_length(rep, avail));
 
         let mut best_rep_len = 0;
         let mut best_rep_index = 0;
-        for rep in state.reps {
-            let len = input.buffer().get_match_length(rep, avail);
+        for i in 0..state.reps.len() {
+            let len = rep_lens[i];
             if len < MATCH_LEN_MIN as u32 {
                 continue;
             }
 
             if len >= self.nice_len {
-                return Some(Match { distance: rep, len });
+                return EncodeInstruction::Rep {
+                    rep_index: i,
+                    len: len,
+                };
             }
 
             if len > best_rep_len {
-                best_rep_index = rep;
+                best_rep_index = i;
                 best_rep_len = len;
             }
         }
@@ -63,10 +69,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
 
             // If the match is long enough, return it
             if main.len >= self.nice_len as u32 {
-                return Some(Match {
-                    distance: main.distance + REPS as u32, // TODO: Why are we adding here?
-                    len: main.len,
-                });
+                return EncodeInstruction::Match(main);
             }
 
             for m in matches[0..matches.len() - 1].iter().rev() {
@@ -99,15 +102,15 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
                 || (best_rep_len + 2 >= main_len && main_dist >= (1 << 9))
                 || (best_rep_len + 3 >= main_len && main_dist >= (1 << 15))
             {
-                return Some(Match {
-                    distance: best_rep_index as u32,
+                return EncodeInstruction::Rep {
+                    rep_index: best_rep_index,
                     len: best_rep_len,
-                });
+                };
             }
         }
 
         if main_len == 0 {
-            return None;
+            return EncodeInstruction::Literal;
         }
 
         // Get the next match. Test if it is better than the current match.
@@ -118,7 +121,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
             let next_match = matches.last().unwrap();
 
             // TODO: Break up this monstrosity, and figure out what it's doing
-            // I copied it from the reference code, but I don't understand it
+            // I copied it from the reference LZMA C code, but I don't understand it
             if (next_match.len >= main_len && next_match.distance < main_dist)
                 || (next_match.len == main_len + 1
                     && !is_distance_sufficiently_shorter(main_dist as _, next_match.distance as _))
@@ -127,22 +130,21 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
                     && main_len >= MATCH_LEN_MIN as u32 + 1
                     && is_distance_sufficiently_shorter(next_match.distance as _, main_dist as _))
             {
-                return None;
+                return EncodeInstruction::Literal;
             }
         }
 
+        // TODO: Reference this file:
+        // https://github.com/chemfiles/lzma/blob/chemfiles/liblzma/lzma/lzma_encoder_optimum_fast.c
+        // to make sure the algorithm actually matches. There's some confusing conditions here.
         let limit = (main_len - 1).max(MATCH_LEN_MIN as _);
-        for rep in state.reps {
-            // TODO: We are calling get_match_length twice on the same values, can we cache them above?
-            // There's only a constant amount of them.
-            if input.buffer().get_match_length(rep, limit) == limit {
-                return None;
-            }
+        if rep_lens.into_iter().any(|r| r >= limit) {
+            return EncodeInstruction::Literal;
         }
 
-        return Some(Match {
-            distance: main_dist + REPS as u32, // TODO: Why are we adding here?
+        return EncodeInstruction::Match(Match {
             len: main_len,
+            distance: main_dist,
         });
     }
 }

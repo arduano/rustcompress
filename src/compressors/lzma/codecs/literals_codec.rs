@@ -69,7 +69,7 @@ impl LiteralCodecDecoder {
         }
     }
 
-    fn decode_normal<R: Read>(
+    pub fn decode_normal<R: Read>(
         &mut self,
         rc: &mut RangeDecoder<R>,
         prev_byte: u8,
@@ -79,7 +79,7 @@ impl LiteralCodecDecoder {
         subcoder.decode_normal_literal(rc)
     }
 
-    fn decode_matched<R: Read>(
+    pub fn decode_matched<R: Read>(
         &mut self,
         rc: &mut RangeDecoder<R>,
         prev_byte: u8,
@@ -102,7 +102,7 @@ impl LiteralCodecEncoder {
         }
     }
 
-    fn encode_normal<W: Write>(
+    pub fn encode_normal<W: Write>(
         &mut self,
         rc: &mut RangeEncoder<W>,
         symbol: u8,
@@ -113,7 +113,7 @@ impl LiteralCodecEncoder {
         subcoder.encode_normal_literal(rc, symbol)
     }
 
-    fn encode_matched<W: Write>(
+    pub fn encode_matched<W: Write>(
         &mut self,
         rc: &mut RangeEncoder<W>,
         symbol: u8,
