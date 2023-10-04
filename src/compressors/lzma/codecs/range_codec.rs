@@ -201,7 +201,7 @@ impl<R: Read> RangeDecoder<R> {
     }
 
     /// Decode bits assuming the probability is 50/50
-    pub fn decode_direct_bits(&mut self, count: u32) -> Result<i32> {
+    pub fn decode_direct_bits(&mut self, count: u32) -> Result<u32> {
         let mut result = 0;
         for _ in 0..count {
             self.normalize()?;

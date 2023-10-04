@@ -10,7 +10,7 @@ use super::range_codec::{RangeDecoder, RangeEncPrice, RangeEncProbability, Range
 ///
 /// **TODO:** Replace BITS_EXP with BITS when https://github.com/rust-lang/rust/issues/76560 is implemented
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct LengthValueCodec<const BITS_EXP: usize> {
+pub struct LengthValueCodec<const BITS_EXP: usize> {
     probs: [RangeEncProbability; BITS_EXP],
 }
 
@@ -27,6 +27,7 @@ impl<const BITS_EXP: usize> LengthValueCodec<BITS_EXP> {
         }
     }
 
+    // TODO: Convert the loops into for loops to allow loop unrolling?
     pub fn encode_bit_tree(
         &mut self,
         enc: &mut RangeEncoder<impl Write>,
