@@ -187,7 +187,7 @@ impl LZMACodecDecoder {
             let limit = (dist_slot >> 1) - 1;
             let mut rep0 = (2 | (dist_slot & 1)) << limit;
 
-            if dist_slot < DIST_MODEL_END {
+            if  dist_slot < DIST_MODEL_END {
                 let dist_slots_index = (dist_slot - DIST_MODEL_START) as usize;
                 rep0 |= self.decode_special_dist_slot(rc, dist_slots_index)?;
             } else {

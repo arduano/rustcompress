@@ -13,7 +13,7 @@ lazy_static = "1.4.0"
 [dev-dependencies]
 criterion = "0.5.1"
 rust-lzma = "0.6.0"
-lzma-rust = "0.1.5"
+lzma-rust = { path = "/home/arduano/programming/downloaded/sevenz-rust/lzma-rust" }
 
 
 # [[bench]]

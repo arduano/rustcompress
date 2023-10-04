@@ -123,13 +123,13 @@ impl DecoderDataBuffer {
 
     pub fn append_match(&mut self, dist: u32, len: u32) {
         debug_assert!(
-            dist + len < self.buf.len() as u32,
+            dist < self.buf.len() as u32,
             "dist: {}, buf.len(): {}",
             dist,
             self.buf.len()
         );
 
-        let start = self.buf.len() - 1 - dist as usize - len as usize;
+        let start = self.buf.len() - 1 - dist as usize;
 
         // The below code is equivalent to the commented out code
         //

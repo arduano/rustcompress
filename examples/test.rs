@@ -35,7 +35,7 @@ fn main() {
     writer.write_all(data).unwrap();
     writer.finish().unwrap();
 
-    dbg!(&compressed);
+    // dbg!(&compressed);
 
     // let mut output = File::create("test.rs.xz").unwrap();
     // output.write_all(&compressed).unwrap();
@@ -57,7 +57,7 @@ fn main() {
     let mut output = vec![0; header.uncompressed_size as usize];
     let mut flushed = 0;
 
-    while out_buffer.flushable_bytes() < header.uncompressed_size as u32 {
+    while flushed < header.uncompressed_size as usize {
         decoder.decode_one_packet(&mut rc, &mut out_buffer).unwrap();
         flushed += out_buffer.flush(&mut output[flushed..]);
         dbg!(String::from_utf8_lossy(&output[..flushed]));
