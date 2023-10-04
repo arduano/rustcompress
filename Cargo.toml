@@ -16,6 +16,9 @@ rust-lzma = "0.6.0"
 lzma-rust = { path = "/home/arduano/programming/downloaded/sevenz-rust/lzma-rust" }
 
 
-# [[bench]]
-# name = "range_enc_branching"
-# harness = false
+[[bench]]
+name = "decompress"
+harness = false
+
+[profile.release]
+debug = true

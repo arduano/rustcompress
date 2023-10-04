@@ -131,24 +131,25 @@ impl DecoderDataBuffer {
 
         let start = self.buf.len() - 1 - dist as usize;
 
-        // The below code is equivalent to the commented out code
-        //
-        let end = start + len as usize;
-        let mut i = start;
-        while i < end {
-            self.buf.push(self.buf[i]);
-            i += 1;
+        if start + len as usize >= self.buf.len() {
+            let end = start + len as usize;
+            let mut i = start;
+            while i < end {
+                self.buf.push(self.buf[i]);
+                i += 1;
+            }
+        } else {
+            self.buf.reserve(len as usize);
+            unsafe {
+                let dest = self.buf.len();
+                self.buf.set_len(self.buf.len() + len as usize);
+                std::ptr::copy_nonoverlapping(
+                    self.buf.as_ptr().add(start),
+                    self.buf.as_mut_ptr().add(dest),
+                    len as usize,
+                );
+            }
         }
-
-        // self.buf.reserve(self.buf.len() + len as usize);
-        // unsafe {
-        //     self.buf.set_len(self.buf.len() + len as usize);
-        //     std::ptr::copy_nonoverlapping(
-        //         self.buf.as_ptr().add(start),
-        //         self.buf.as_mut_ptr().add(start + len as usize),
-        //         len as usize,
-        //     );
-        // }
     }
 
     pub fn available_bytes_back(&self) -> u32 {
@@ -184,7 +185,6 @@ impl DecoderDataBuffer {
 
     pub fn flush(&mut self, buf: &mut [u8]) -> usize {
         let bytes_to_flush = buf.len().min(self.flushable_bytes() as usize);
-        dbg!(bytes_to_flush);
         buf[..bytes_to_flush].copy_from_slice(
             // TODO: Split this line
             &self.buf[self.flushed_pos as usize..(self.flushed_pos as usize + bytes_to_flush)],
