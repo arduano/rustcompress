@@ -131,10 +131,10 @@ impl DecoderDataBuffer {
         debug_assert!(dist > len, "dist: {}, len: {}", dist, len);
 
         let start = self.buf.len() - 1 - dist as usize;
-        let end = start + len as usize;
 
         // The below code is equivalent to the commented out code
         //
+        // let end = start + len as usize;
         // let mut i = start;
         // while i < end {
         //     self.buf.push(self.buf[i]);
