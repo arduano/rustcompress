@@ -151,7 +151,7 @@ pub struct RangeDecoder<R> {
 }
 
 impl<R: Read> RangeDecoder<R> {
-    pub fn new_stream(mut stream: R) -> Result<Self> {
+    pub fn new(mut stream: R) -> Result<Self> {
         let b = stream.read_u8()?;
         if b != 0x00 {
             return Err(std::io::Error::new(
@@ -236,7 +236,7 @@ mod tests {
 
         assert_eq!(buf.len(), 105);
 
-        let mut decoder = RangeDecoder::new_stream(Cursor::new(buf)).unwrap();
+        let mut decoder = RangeDecoder::new(Cursor::new(buf)).unwrap();
 
         for i in 0..100 {
             let result = decoder.decode_direct_bits(8).unwrap();
@@ -262,7 +262,7 @@ mod tests {
         assert_eq!(buf.len(), 197);
 
         let mut prob = RangeEncProbability::new();
-        let mut decoder = RangeDecoder::new_stream(Cursor::new(buf)).unwrap();
+        let mut decoder = RangeDecoder::new(Cursor::new(buf)).unwrap();
         for i in 0..100 {
             let mut result = 0;
             for bit in 0..32 {
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(buf.len(), 14);
 
         let mut prob = RangeEncProbability::new();
-        let mut decoder = RangeDecoder::new_stream(Cursor::new(buf)).unwrap();
+        let mut decoder = RangeDecoder::new(Cursor::new(buf)).unwrap();
         for _ in 0..1000 {
             let result = decoder.decode_bit(&mut prob).unwrap();
 

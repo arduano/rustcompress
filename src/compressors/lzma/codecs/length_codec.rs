@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(buf.len(), 227);
 
         let mut codec = LengthValueCodec::<256>::new();
-        let mut decoder = RangeDecoder::new_stream(Cursor::new(buf)).unwrap();
+        let mut decoder = RangeDecoder::new(Cursor::new(buf)).unwrap();
         for i in 0..256 {
             let result = codec.decode_bit_tree(&mut decoder).unwrap();
             assert_eq!(result, i);
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(buf.len(), 266);
 
         let mut codec = LengthValueCodec::<256>::new();
-        let mut decoder = RangeDecoder::new_stream(Cursor::new(buf)).unwrap();
+        let mut decoder = RangeDecoder::new(Cursor::new(buf)).unwrap();
         for i in 0..256 {
             let result = codec.decode_reverse_bit_tree(&mut decoder).unwrap();
             assert_eq!(result, i);
@@ -450,7 +450,7 @@ mod tests {
         assert_eq!(buf.len(), 475);
 
         let mut codec = LengthCodecDecoder::new(1);
-        let mut decoder = RangeDecoder::new_stream(Cursor::new(buf)).unwrap();
+        let mut decoder = RangeDecoder::new(Cursor::new(buf)).unwrap();
 
         for i in 2..max {
             let result = codec.decode(&mut decoder, 0).unwrap();

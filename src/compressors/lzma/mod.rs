@@ -15,6 +15,9 @@ const ALIGN_BITS: usize = 4;
 const ALIGN_SIZE: usize = 1 << ALIGN_BITS;
 const ALIGN_MASK: usize = ALIGN_SIZE - 1;
 
+pub const DICT_SIZE_MIN: u32 = 4096;
+pub const DICT_SIZE_MAX: u32 = u32::MAX & !(15 as u32);
+
 // TODO: Move this to other places when I figure out the point of this
 
 pub struct LZMACoderState {

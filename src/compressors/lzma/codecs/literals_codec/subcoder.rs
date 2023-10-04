@@ -167,7 +167,7 @@ mod tests {
         encoder.finish().unwrap();
 
         let mut subcoder = LiteralSubcoder::new();
-        let mut decoder = RangeDecoder::new_stream(Cursor::new(buf)).unwrap();
+        let mut decoder = RangeDecoder::new(Cursor::new(buf)).unwrap();
         for i in 0..256 {
             let result = subcoder.decode_normal_literal(&mut decoder).unwrap();
             assert_eq!(result, i as u8);
@@ -192,7 +192,7 @@ mod tests {
         encoder.finish().unwrap();
 
         let mut subcoder = LiteralSubcoder::new();
-        let mut decoder = RangeDecoder::new_stream(Cursor::new(buf)).unwrap();
+        let mut decoder = RangeDecoder::new(Cursor::new(buf)).unwrap();
         for i in 0..256 {
             let result = subcoder
                 .decode_matched_literal(&mut decoder, match_byte)
