@@ -5,7 +5,7 @@
 pub struct MatchReadPos(u32);
 
 impl MatchReadPos {
-    // TODO: Test normalization functions correctly by reducing the below value to something small.
+    // TODO: Test that normalization functions correctly by reducing the below value to something small.
     const MAX_SAFE_READ_POS: Self = Self(0x7FFFFFFF);
 
     pub fn new(pos: u32) -> Self {

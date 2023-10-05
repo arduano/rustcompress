@@ -125,9 +125,9 @@ impl LZMACodecDecoder {
         output: &mut DecoderDataBuffer,
     ) -> io::Result<()> {
         let pos_state = output.position() as u32 & self.codec.pos_mask;
-        let i = self.codec.state.get() as usize;
+        let index = self.codec.state.get() as usize;
 
-        let prob = &mut self.codec.is_match_probs[i][pos_state as usize];
+        let prob = &mut self.codec.is_match_probs[index][pos_state as usize];
         let bit = rc.decode_bit(prob)?;
 
         if bit == 0 {
@@ -152,7 +152,6 @@ impl LZMACodecDecoder {
             output.append_byte(byte);
             self.codec.state.update_literal();
         } else {
-            let index = self.codec.state.get() as usize; // TODO: Do we need to fetch again?
             let prob = &mut self.codec.is_rep_probs[index];
 
             let match_ = if rc.decode_bit(prob)? == 0 {
@@ -163,8 +162,6 @@ impl LZMACodecDecoder {
 
             output.append_match(match_.distance, match_.len);
         }
-
-        rc.normalize()?; // TODO: Do we need this?
 
         Ok(())
     }
@@ -237,7 +234,6 @@ impl LZMACodecDecoder {
 
         let prob = &mut self.codec.is_rep0_probs[index];
         if rc.decode_bit(prob)? == 0 {
-            let index: usize = self.codec.state.get() as usize; // TODO: Do we need to fetch again?
             let prob = &mut self.codec.is_rep0_long_probs[index][pos_state as usize];
             if rc.decode_bit(prob)? == 0 {
                 self.codec.state.update_short_rep();
@@ -248,12 +244,11 @@ impl LZMACodecDecoder {
             }
         } else {
             let tmp;
-            let s = self.codec.state.get() as usize; // TODO: Do we need to fetch again?
-            let prob = &mut self.codec.is_rep1_probs[s];
+            let prob = &mut self.codec.is_rep1_probs[index];
             if rc.decode_bit(prob)? == 0 {
                 tmp = self.codec.reps[1];
             } else {
-                let prob = &mut self.codec.is_rep2_probs[s];
+                let prob = &mut self.codec.is_rep2_probs[index];
                 if rc.decode_bit(prob)? == 0 {
                     tmp = self.codec.reps[2];
                 } else {

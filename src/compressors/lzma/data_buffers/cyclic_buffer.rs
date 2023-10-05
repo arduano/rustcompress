@@ -136,6 +136,10 @@ impl<T: Copy + Default> CyclicBuffer<T> {
 
     /// Append the buffer range from the specified offsets to the end of the buffer.
     /// Technically, the range is reversed as it's backwards.
+    ///
+    /// The range can't overlap with the destination in the buffer. It will panic if it does.
+    ///
+    /// This function is significantly faster than doing it manually.
     pub fn append_past_data(&mut self, backwards_offset_range: Range<usize>) {
         let len = backwards_offset_range.end - backwards_offset_range.start;
 
@@ -144,8 +148,6 @@ impl<T: Copy + Default> CyclicBuffer<T> {
         if len == 0 {
             return;
         }
-
-        // TODO: Triple check these conditions for off by one errors
 
         // TODO: Write rigorous unit tests for this function just in case
 

@@ -4,7 +4,7 @@ use super::codecs::length_codec::MATCH_LEN_MAX;
 
 mod cyclic_buffer;
 
-// TODO: For both of these, test if Vec or VecDeque is faster
+// TODO: Port EncoderDataBuffer to use CyclicBuffer
 
 pub struct EncoderDataBuffer {
     read_pos: u32,

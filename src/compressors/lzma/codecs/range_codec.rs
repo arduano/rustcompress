@@ -173,7 +173,7 @@ impl<R: Read> RangeDecoder<R> {
 }
 
 impl<R: Read> RangeDecoder<R> {
-    pub fn normalize(&mut self) -> Result<()> {
+    fn normalize(&mut self) -> Result<()> {
         if self.range < K_TOP_VALUE {
             let next = self.stream.read_u8()? as u32;
             self.code = (self.code << SHIFT_BITS) | next;

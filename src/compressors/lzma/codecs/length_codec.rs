@@ -27,7 +27,6 @@ impl<const BITS_EXP: usize> LengthValueCodec<BITS_EXP> {
         }
     }
 
-    // TODO: Convert the loops into for loops to allow loop unrolling?
     pub fn encode_bit_tree(
         &mut self,
         enc: &mut RangeEncoder<impl Write>,
