@@ -17,7 +17,11 @@ lzma-rust = { path = "/home/arduano/programming/downloaded/sevenz-rust/lzma-rust
 
 
 [[bench]]
-name = "decompress"
+name = "decompress_mine"
+harness = false
+
+[[bench]]
+name = "decompress_other"
 harness = false
 
 [profile.release]

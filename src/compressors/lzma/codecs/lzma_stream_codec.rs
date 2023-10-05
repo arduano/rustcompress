@@ -132,9 +132,15 @@ impl LZMACodecDecoder {
 
         if bit == 0 {
             let byte = if self.codec.state.is_literal() {
+                let last_byte = if output.is_empty() {
+                    0
+                } else {
+                    output.get_byte(0)
+                };
+
                 self.literal_decoder.decode_normal(
                     rc,
-                    output.get_byte(0),
+                    last_byte,
                     output.position() as usize,
                 )?
             } else {
@@ -187,7 +193,7 @@ impl LZMACodecDecoder {
             let limit = (dist_slot >> 1) - 1;
             let mut rep0 = (2 | (dist_slot & 1)) << limit;
 
-            if  dist_slot < DIST_MODEL_END {
+            if dist_slot < DIST_MODEL_END {
                 let dist_slots_index = (dist_slot - DIST_MODEL_START) as usize;
                 rep0 |= self.decode_special_dist_slot(rc, dist_slots_index)?;
             } else {

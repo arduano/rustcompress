@@ -19,7 +19,7 @@ fn fibonacci(n: u64) -> u64 {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let data = include_bytes!("./decompress.rs");
+    let data = include_bytes!("../src/compressors/lzma/codecs/range_codec.rs");
 
     let mut compressed = Vec::new();
 
@@ -32,11 +32,14 @@ fn criterion_benchmark(c: &mut Criterion) {
         Some(data.len() as u64 * 1000),
     )
     .unwrap();
-    for i in 0..1000 {
+    for _ in 0..1000 {
         writer.write_all(data).unwrap();
     }
     writer.finish().unwrap();
 
+    dbg!(data.len() * 1000);
+
+    let mut output = vec![0; data.len() * 1000];
     c.bench_function("decompress small mine", |b| {
         b.iter(|| {
             let mut reader = Cursor::new(&compressed);
@@ -51,28 +54,12 @@ fn criterion_benchmark(c: &mut Criterion) {
                 header.props.pb as u32,
             );
 
-            let mut output = vec![0; header.uncompressed_size as usize];
             let mut flushed = 0;
 
             while flushed < header.uncompressed_size as usize {
                 decoder.decode_one_packet(&mut rc, &mut out_buffer).unwrap();
                 flushed += out_buffer.flush(&mut output[flushed..]);
             }
-
-            output
-        })
-    });
-
-    c.bench_function("decompress small other", |b| {
-        b.iter(|| {
-            let mut reader = Cursor::new(&compressed);
-            let mut parser = LZMAReader::new_mem_limit(reader, u32::MAX, None).unwrap();
-
-            let mut output = Vec::new();
-
-            parser.read_to_end(&mut output).unwrap();
-
-            output
         })
     });
 }
