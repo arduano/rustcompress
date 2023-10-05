@@ -24,5 +24,9 @@ harness = false
 name = "decompress_other"
 harness = false
 
+[[bench]]
+name = "decompress_sdk"
+harness = false
+
 [profile.release]
 debug = true
