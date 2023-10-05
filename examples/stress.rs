@@ -1,15 +1,10 @@
-use std::{
-    fs::File,
-    io::{Cursor, Seek, Write},
-};
+use std::io::{Cursor, Write};
 
-use lzma::LzmaWriter;
 use lzma_rust::LZMA2Options;
 use rustcompress::compressors::lzma::{
     codecs::{
-        header_codec::parse_lzma_header,
-        lzma_stream_codec::LZMACodecDecoder,
-        range_codec::{RangeDecoder, RangeEncoder},
+        header_codec::parse_lzma_header, lzma_stream_codec::LZMACodecDecoder,
+        range_codec::RangeDecoder,
     },
     data_buffers::DecoderDataBuffer,
 };
@@ -19,7 +14,7 @@ fn main() {
 
     let mut compressed = Vec::new();
 
-    let mut counting_writer = lzma_rust::CountingWriter::new(&mut compressed);
+    let counting_writer = lzma_rust::CountingWriter::new(&mut compressed);
     let mut writer = lzma_rust::LZMAWriter::new(
         counting_writer,
         &LZMA2Options::default(),

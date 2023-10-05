@@ -138,11 +138,8 @@ impl LZMACodecDecoder {
                     output.get_byte(0)
                 };
 
-                self.literal_decoder.decode_normal(
-                    rc,
-                    last_byte,
-                    output.position() as usize,
-                )?
+                self.literal_decoder
+                    .decode_normal(rc, last_byte, output.position() as usize)?
             } else {
                 self.literal_decoder.decode_matched(
                     rc,

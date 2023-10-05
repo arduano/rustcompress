@@ -1,14 +1,7 @@
 use std::io::{Cursor, Read, Write};
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use lzma_rust::LZMAReader;
-use rustcompress::compressors::lzma::{
-    codecs::{
-        header_codec::parse_lzma_header, lzma_stream_codec::LZMACodecDecoder,
-        range_codec::RangeDecoder,
-    },
-    data_buffers::DecoderDataBuffer,
-};
 
 fn fibonacci(n: u64) -> u64 {
     match n {
@@ -32,7 +25,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         Some(data.len() as u64 * 1000),
     )
     .unwrap();
-    for i in 0..1000 {
+    for _i in 0..1000 {
         writer.write_all(data).unwrap();
     }
     writer.finish().unwrap();

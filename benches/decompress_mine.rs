@@ -1,7 +1,10 @@
-use std::io::{Cursor, Read, Write};
+use std::{
+    io::{Cursor, Write},
+    time::Duration,
+};
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use lzma_rust::LZMAReader;
+use criterion::{criterion_group, criterion_main, Criterion};
+
 use rustcompress::compressors::lzma::{
     codecs::{
         header_codec::parse_lzma_header, lzma_stream_codec::LZMACodecDecoder,
@@ -9,14 +12,6 @@ use rustcompress::compressors::lzma::{
     },
     data_buffers::DecoderDataBuffer,
 };
-
-fn fibonacci(n: u64) -> u64 {
-    match n {
-        0 => 1,
-        1 => 1,
-        n => fibonacci(n - 1) + fibonacci(n - 2),
-    }
-}
 
 fn criterion_benchmark(c: &mut Criterion) {
     let data = include_bytes!("../src/compressors/lzma/codecs/range_codec.rs");
@@ -40,6 +35,8 @@ fn criterion_benchmark(c: &mut Criterion) {
     dbg!(data.len() * 1000);
 
     let mut output = vec![0; data.len() * 1000];
+    let mut c = c.benchmark_group("mine");
+    c.measurement_time(Duration::from_secs(60));
     c.bench_function("decompress small mine", |b| {
         b.iter(|| {
             let mut reader = Cursor::new(&compressed);
@@ -62,6 +59,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             }
         })
     });
+    c.finish();
 }
 
 criterion_group!(benches, criterion_benchmark);
