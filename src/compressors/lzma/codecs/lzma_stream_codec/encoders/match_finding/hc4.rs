@@ -1,4 +1,4 @@
-use crate::compressors::lzma::data_buffers::EncoderDataBuffer;
+use super::super::super::data_buffers::EncoderDataBuffer;
 
 use super::utils::{
     cyclic_vec::CyclicVec,
@@ -230,7 +230,7 @@ impl MatchFinder for HC4MatchFinder {
 
 #[cfg(test)]
 mod tests {
-    use crate::compressors::lzma::match_finding::brute_force::BruteForceMatchFinder;
+    use super::super::brute_force::BruteForceMatchFinder;
 
     use super::*;
 

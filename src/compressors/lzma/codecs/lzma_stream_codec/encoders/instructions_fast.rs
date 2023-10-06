@@ -1,10 +1,15 @@
 use crate::compressors::lzma::{
-    codecs::length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
-    match_finding::{Match, MatchFinder},
+    codecs::{
+        length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
+        lzma_stream_codec::LZMACodec,
+    },
     LZMACoderState,
 };
 
-use super::{EncodeInstruction, LZMAEncoderInput, LZMAInstructionPicker};
+use super::{
+    match_finding::{Match, MatchFinder},
+    EncodeInstruction, LZMAEncoderInput, LZMAInstructionPicker,
+};
 
 pub struct LZMAFastInstructionPicker {
     nice_len: u32,
@@ -21,7 +26,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
     fn get_next_symbol(
         &mut self,
         input: &mut LZMAEncoderInput<impl MatchFinder>,
-        state: &LZMACoderState,
+        state: &LZMACodec,
     ) -> EncodeInstruction {
         let avail = input.buffer().forwards_bytes().min(MATCH_LEN_MAX);
 

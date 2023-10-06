@@ -1,10 +1,10 @@
+mod data_buffers;
+mod encoders;
 mod state;
 
 use std::io::{self, Read};
 
-use crate::compressors::lzma::{data_buffers::DecoderDataBuffer, match_finding::Match};
-
-use self::state::State;
+use self::{data_buffers::DecoderDataBuffer, encoders::LZMAInstructionPicker, state::State};
 
 use super::{
     length_codec::{LengthCodecDecoder, LengthCodecEncoder, LengthValueCodec},
@@ -33,7 +33,7 @@ fn coder_get_dict_size(len: usize) -> usize {
     }
 }
 
-struct LZMACodec {
+pub struct LZMACodec {
     pos_mask: u32,
     state: State,
 
@@ -98,204 +98,214 @@ impl LZMACodec {
             dist_align_probs: LengthValueCodec::new(),
         }
     }
-}
 
-pub struct LZMACodecDecoder {
-    codec: LZMACodec,
-
-    literal_decoder: LiteralCodecDecoder,
-    match_len_decoder: LengthCodecDecoder,
-    rep_len_decoder: LengthCodecDecoder,
-}
-
-impl LZMACodecDecoder {
-    pub fn new(lc: u32, lp: u32, pb: u32) -> Self {
-        Self {
-            codec: LZMACodec::new(pb),
-
-            literal_decoder: LiteralCodecDecoder::new(lc, lp),
-            match_len_decoder: LengthCodecDecoder::new(pb),
-            rep_len_decoder: LengthCodecDecoder::new(pb),
-        }
-    }
-
-    pub fn decode_one_packet(
-        &mut self,
-        rc: &mut RangeDecoder<impl Read>,
-        output: &mut DecoderDataBuffer,
-    ) -> io::Result<()> {
-        let pos_state = output.position() as u32 & self.codec.pos_mask;
-        let index = self.codec.state.get() as usize;
-
-        let prob = &mut self.codec.is_match_probs[index][pos_state as usize];
-        let bit = rc.decode_bit(prob)?;
-
-        if bit == 0 {
-            let byte = if self.codec.state.is_literal() {
-                let last_byte = if output.is_empty() {
-                    0
-                } else {
-                    output.get_byte(0)
-                };
-
-                self.literal_decoder
-                    .decode_normal(rc, last_byte, output.position() as usize)?
-            } else {
-                self.literal_decoder.decode_matched(
-                    rc,
-                    output.get_byte(0),
-                    output.position() as usize,
-                    output.get_byte(self.codec.reps[0]),
-                )?
-            };
-
-            output.append_byte(byte);
-            self.codec.state.update_literal();
-        } else {
-            let prob = &mut self.codec.is_rep_probs[index];
-
-            let match_ = if rc.decode_bit(prob)? == 0 {
-                self.decode_match(pos_state, rc)?
-            } else {
-                self.decode_rep_match(pos_state, rc)?
-            };
-
-            output.append_match(match_.distance, match_.len);
-        }
-
-        Ok(())
-    }
-
-    fn decode_match<R: Read>(
-        &mut self,
-        pos_state: u32,
-        rc: &mut RangeDecoder<R>,
-    ) -> io::Result<Match> {
-        self.codec.state.update_match();
-
-        self.codec.reps[3] = self.codec.reps[2];
-        self.codec.reps[2] = self.codec.reps[1];
-        self.codec.reps[1] = self.codec.reps[0];
-
-        let len = self.match_len_decoder.decode(rc, pos_state)?;
-        let slot_decoder = &mut self.codec.dist_slot_probs[coder_get_dict_size(len as usize)];
-        let dist_slot = slot_decoder.decode_bit_tree(rc)?;
-
-        if dist_slot < DIST_MODEL_START {
-            self.codec.reps[0] = dist_slot as _;
-        } else {
-            let limit = (dist_slot >> 1) - 1;
-            let mut rep0 = (2 | (dist_slot & 1)) << limit;
-
-            if dist_slot < DIST_MODEL_END {
-                let dist_slots_index = (dist_slot - DIST_MODEL_START) as usize;
-                rep0 |= self.decode_special_dist_slot(rc, dist_slots_index)?;
-            } else {
-                rep0 |= rc.decode_direct_bits(limit as u32 - ALIGN_BITS as u32)? << ALIGN_BITS;
-                rep0 |= self.codec.dist_align_probs.decode_reverse_bit_tree(rc)?;
-            }
-
-            self.codec.reps[0] = rep0;
-        }
-
-        Ok(Match {
-            len,
-            distance: self.codec.reps[0],
-        })
-    }
-
-    fn decode_special_dist_slot(
-        &mut self,
-        rc: &mut RangeDecoder<impl Read>,
-        index: usize,
-    ) -> io::Result<u32> {
-        let probs = &mut self.codec.dist_special_probs;
-        Ok(match index {
-            0 => probs.0.decode_reverse_bit_tree(rc)?,
-            1 => probs.1.decode_reverse_bit_tree(rc)?,
-            2 => probs.2.decode_reverse_bit_tree(rc)?,
-            3 => probs.3.decode_reverse_bit_tree(rc)?,
-            4 => probs.4.decode_reverse_bit_tree(rc)?,
-            5 => probs.5.decode_reverse_bit_tree(rc)?,
-            6 => probs.6.decode_reverse_bit_tree(rc)?,
-            7 => probs.7.decode_reverse_bit_tree(rc)?,
-            8 => probs.8.decode_reverse_bit_tree(rc)?,
-            9 => probs.9.decode_reverse_bit_tree(rc)?,
-            _ => unreachable!(),
-        })
-    }
-
-    fn decode_rep_match(
-        &mut self,
-        pos_state: u32,
-        rc: &mut RangeDecoder<impl Read>,
-    ) -> io::Result<Match> {
-        let index = self.codec.state.get() as usize;
-
-        let prob = &mut self.codec.is_rep0_probs[index];
-        if rc.decode_bit(prob)? == 0 {
-            let prob = &mut self.codec.is_rep0_long_probs[index][pos_state as usize];
-            if rc.decode_bit(prob)? == 0 {
-                self.codec.state.update_short_rep();
-                return Ok(Match {
-                    len: 1,
-                    distance: self.codec.reps[0],
-                });
-            }
-        } else {
-            let tmp;
-            let prob = &mut self.codec.is_rep1_probs[index];
-            if rc.decode_bit(prob)? == 0 {
-                tmp = self.codec.reps[1];
-            } else {
-                let prob = &mut self.codec.is_rep2_probs[index];
-                if rc.decode_bit(prob)? == 0 {
-                    tmp = self.codec.reps[2];
-                } else {
-                    tmp = self.codec.reps[3];
-                    self.codec.reps[3] = self.codec.reps[2];
-                }
-                self.codec.reps[2] = self.codec.reps[1];
-            }
-            self.codec.reps[1] = self.codec.reps[0];
-            self.codec.reps[0] = tmp;
-        }
-
-        self.codec.state.update_long_rep();
-        let len = self.rep_len_decoder.decode(rc, pos_state as _)?;
-
-        Ok(Match {
-            len,
-            distance: self.codec.reps[0],
-        })
+    pub fn reps(&self) -> &[u32; REPS] {
+        &self.reps
     }
 }
 
-// pub struct LZMACodecEncoder {
+// pub struct LZMACodecDecoder {
+//     codec: LZMACodec,
+
+//     literal_decoder: LiteralCodecDecoder,
+//     match_len_decoder: LengthCodecDecoder,
+//     rep_len_decoder: LengthCodecDecoder,
+// }
+
+// impl LZMACodecDecoder {
+//     pub fn new(lc: u32, lp: u32, pb: u32) -> Self {
+//         Self {
+//             codec: LZMACodec::new(pb),
+
+//             literal_decoder: LiteralCodecDecoder::new(lc, lp),
+//             match_len_decoder: LengthCodecDecoder::new(pb),
+//             rep_len_decoder: LengthCodecDecoder::new(pb),
+//         }
+//     }
+
+//     pub fn decode_one_packet(
+//         &mut self,
+//         rc: &mut RangeDecoder<impl Read>,
+//         output: &mut DecoderDataBuffer,
+//     ) -> io::Result<()> {
+//         let pos_state = output.position() as u32 & self.codec.pos_mask;
+//         let index = self.codec.state.get() as usize;
+
+//         let prob = &mut self.codec.is_match_probs[index][pos_state as usize];
+//         let bit = rc.decode_bit(prob)?;
+
+//         if bit == 0 {
+//             let byte = if self.codec.state.is_literal() {
+//                 let last_byte = if output.is_empty() {
+//                     0
+//                 } else {
+//                     output.get_byte(0)
+//                 };
+
+//                 self.literal_decoder
+//                     .decode_normal(rc, last_byte, output.position() as usize)?
+//             } else {
+//                 self.literal_decoder.decode_matched(
+//                     rc,
+//                     output.get_byte(0),
+//                     output.position() as usize,
+//                     output.get_byte(self.codec.reps[0]),
+//                 )?
+//             };
+
+//             output.append_byte(byte);
+//             self.codec.state.update_literal();
+//         } else {
+//             let prob = &mut self.codec.is_rep_probs[index];
+
+//             let match_ = if rc.decode_bit(prob)? == 0 {
+//                 self.decode_match(pos_state, rc)?
+//             } else {
+//                 self.decode_rep_match(pos_state, rc)?
+//             };
+
+//             output.append_match(match_.distance, match_.len);
+//         }
+
+//         Ok(())
+//     }
+
+//     fn decode_match<R: Read>(
+//         &mut self,
+//         pos_state: u32,
+//         rc: &mut RangeDecoder<R>,
+//     ) -> io::Result<Match> {
+//         self.codec.state.update_match();
+
+//         self.codec.reps[3] = self.codec.reps[2];
+//         self.codec.reps[2] = self.codec.reps[1];
+//         self.codec.reps[1] = self.codec.reps[0];
+
+//         let len = self.match_len_decoder.decode(rc, pos_state)?;
+//         let slot_decoder = &mut self.codec.dist_slot_probs[coder_get_dict_size(len as usize)];
+//         let dist_slot = slot_decoder.decode_bit_tree(rc)?;
+
+//         if dist_slot < DIST_MODEL_START {
+//             self.codec.reps[0] = dist_slot as _;
+//         } else {
+//             let limit = (dist_slot >> 1) - 1;
+//             let mut rep0 = (2 | (dist_slot & 1)) << limit;
+
+//             if dist_slot < DIST_MODEL_END {
+//                 let dist_slots_index = (dist_slot - DIST_MODEL_START) as usize;
+//                 rep0 |= self.decode_special_dist_slot(rc, dist_slots_index)?;
+//             } else {
+//                 rep0 |= rc.decode_direct_bits(limit as u32 - ALIGN_BITS as u32)? << ALIGN_BITS;
+//                 rep0 |= self.codec.dist_align_probs.decode_reverse_bit_tree(rc)?;
+//             }
+
+//             self.codec.reps[0] = rep0;
+//         }
+
+//         Ok(Match {
+//             len,
+//             distance: self.codec.reps[0],
+//         })
+//     }
+
+//     fn decode_special_dist_slot(
+//         &mut self,
+//         rc: &mut RangeDecoder<impl Read>,
+//         index: usize,
+//     ) -> io::Result<u32> {
+//         let probs = &mut self.codec.dist_special_probs;
+//         Ok(match index {
+//             0 => probs.0.decode_reverse_bit_tree(rc)?,
+//             1 => probs.1.decode_reverse_bit_tree(rc)?,
+//             2 => probs.2.decode_reverse_bit_tree(rc)?,
+//             3 => probs.3.decode_reverse_bit_tree(rc)?,
+//             4 => probs.4.decode_reverse_bit_tree(rc)?,
+//             5 => probs.5.decode_reverse_bit_tree(rc)?,
+//             6 => probs.6.decode_reverse_bit_tree(rc)?,
+//             7 => probs.7.decode_reverse_bit_tree(rc)?,
+//             8 => probs.8.decode_reverse_bit_tree(rc)?,
+//             9 => probs.9.decode_reverse_bit_tree(rc)?,
+//             _ => unreachable!(),
+//         })
+//     }
+
+//     fn decode_rep_match(
+//         &mut self,
+//         pos_state: u32,
+//         rc: &mut RangeDecoder<impl Read>,
+//     ) -> io::Result<Match> {
+//         let index = self.codec.state.get() as usize;
+
+//         let prob = &mut self.codec.is_rep0_probs[index];
+//         if rc.decode_bit(prob)? == 0 {
+//             let prob = &mut self.codec.is_rep0_long_probs[index][pos_state as usize];
+//             if rc.decode_bit(prob)? == 0 {
+//                 self.codec.state.update_short_rep();
+//                 return Ok(Match {
+//                     len: 1,
+//                     distance: self.codec.reps[0],
+//                 });
+//             }
+//         } else {
+//             let tmp;
+//             let prob = &mut self.codec.is_rep1_probs[index];
+//             if rc.decode_bit(prob)? == 0 {
+//                 tmp = self.codec.reps[1];
+//             } else {
+//                 let prob = &mut self.codec.is_rep2_probs[index];
+//                 if rc.decode_bit(prob)? == 0 {
+//                     tmp = self.codec.reps[2];
+//                 } else {
+//                     tmp = self.codec.reps[3];
+//                     self.codec.reps[3] = self.codec.reps[2];
+//                 }
+//                 self.codec.reps[2] = self.codec.reps[1];
+//             }
+//             self.codec.reps[1] = self.codec.reps[0];
+//             self.codec.reps[0] = tmp;
+//         }
+
+//         self.codec.state.update_long_rep();
+//         let len = self.rep_len_decoder.decode(rc, pos_state as _)?;
+
+//         Ok(Match {
+//             len,
+//             distance: self.codec.reps[0],
+//         })
+//     }
+// }
+
+// pub struct LZMACodecEncoder<Mode: LZMAInstructionPicker> {
 //     codec: LZMACodec,
 
 //     literal_encoder: LiteralCodecEncoder,
 //     match_len_encoder: LengthCodecEncoder,
 //     rep_len_encoder: LengthCodecEncoder,
+
+//     picker: Mode,
 // }
 
-// impl LZMACodecEncoder {
+// impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
 //     // TODO: Simplify these args by using structs
-//     pub fn new(lc: u32, lp: u32, pb: u32, nice_len: u32) -> Self {
+//     pub fn new(lc: u32, lp: u32, pb: u32, nice_len: u32, picker: Mode) -> Self {
 //         Self {
 //             codec: LZMACodec::new(pb),
 
 //             literal_encoder: LiteralCodecEncoder::new(lc, lp),
 //             match_len_encoder: LengthCodecEncoder::new(pb, nice_len),
 //             rep_len_encoder: LengthCodecEncoder::new(pb, nice_len),
+
+//             picker,
 //         }
 //     }
 
 //     pub fn encode_one_packet(
 //         &mut self,
-//         rc: &mut RangeDecoder<impl Read>,
+//         rc: &mut RangeEncoder<impl Read>,
 //         output: &mut DecoderDataBuffer,
 //     ) -> io::Result<()> {
+//         let instruction = self.picker.get_next_symbol(data, state)
+
 //         let pos_state = output.position() as u32 & self.codec.pos_mask;
 //         let index = self.codec.state.get() as usize;
 

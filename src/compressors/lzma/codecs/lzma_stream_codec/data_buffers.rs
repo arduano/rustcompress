@@ -1,6 +1,6 @@
-use self::cyclic_buffer::CyclicBuffer;
+use super::super::length_codec::MATCH_LEN_MAX;
 
-use super::codecs::length_codec::MATCH_LEN_MAX;
+use self::cyclic_buffer::CyclicBuffer;
 
 mod cyclic_buffer;
 

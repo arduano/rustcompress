@@ -1,11 +1,11 @@
-use super::{
-    codecs::length_codec::MATCH_LEN_MAX,
-    data_buffers::EncoderDataBuffer,
-    match_finding::{Match, MatchFinder},
-    LZMACoderState,
-};
+use super::super::length_codec::MATCH_LEN_MAX;
+
+use self::match_finding::{Match, MatchFinder};
+
+use super::{data_buffers::EncoderDataBuffer, LZMACodec};
 
 mod instructions_fast;
+mod match_finding;
 
 pub enum EncodeInstruction {
     Literal,
@@ -17,7 +17,7 @@ pub trait LZMAInstructionPicker {
     fn get_next_symbol(
         &mut self,
         data: &mut LZMAEncoderInput<impl MatchFinder>,
-        state: &LZMACoderState,
+        state: &LZMACodec,
     ) -> EncodeInstruction;
 }
 

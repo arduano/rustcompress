@@ -4,7 +4,7 @@
 //! This is mainly used for testing to ensure that the more complex match finders are
 //! working correctly.
 
-use crate::compressors::lzma::data_buffers::EncoderDataBuffer;
+use super::super::super::data_buffers::EncoderDataBuffer;
 
 use super::{Match, MatchFinder};
 

@@ -1,4 +1,4 @@
-use super::data_buffers::EncoderDataBuffer;
+use super::super::data_buffers::EncoderDataBuffer;
 
 pub mod brute_force;
 pub mod hc4;
