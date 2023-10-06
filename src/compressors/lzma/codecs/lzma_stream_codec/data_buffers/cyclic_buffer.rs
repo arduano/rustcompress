@@ -139,7 +139,7 @@ impl<T: Copy + Default> CyclicBuffer<T> {
     }
 
     pub fn push_slice(&mut self, val: &[T]) {
-        let mut index = (self.pos % self.buf.len() as u64) as usize;
+        let index = (self.pos % self.buf.len() as u64) as usize;
         let mut written = 0;
         while written < val.len() {
             let distance_to_end = self.buf.len() - index;

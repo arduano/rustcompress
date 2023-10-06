@@ -1,9 +1,6 @@
-use crate::compressors::lzma::{
-    codecs::{
-        length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
-        lzma_stream_codec::LZMACodec,
-    },
-    LZMACoderState,
+use crate::compressors::lzma::codecs::{
+    length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
+    lzma_stream_codec::LZMACodec,
 };
 
 use super::{

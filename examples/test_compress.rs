@@ -1,14 +1,13 @@
 // Test
 // Test
 
-use std::io::{Cursor, Write};
+use std::io::Cursor;
 
-use lzma_rust::LZMA2Options;
 use rustcompress::compressors::lzma::codecs::{
-    header_codec::{parse_lzma_header, LzmaHeader, LzmaHeaderProps},
+    header_codec::{LzmaHeader, LzmaHeaderProps},
     length_codec::MATCH_LEN_MAX,
     lzma_stream_codec::{
-        data_buffers::{DecoderDataBuffer, EncoderDataBuffer},
+        data_buffers::DecoderDataBuffer,
         encoders::{
             instructions_fast::LZMAFastInstructionPicker, match_finding::hc4::HC4MatchFinder,
             LZMAEncoderInput,

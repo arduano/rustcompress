@@ -6,7 +6,9 @@ use std::{
 use criterion::{criterion_group, criterion_main, Criterion};
 
 use rustcompress::compressors::lzma::codecs::{
-    header_codec::parse_lzma_header, lzma_stream_codec::{LZMACodecDecoder, data_buffers::DecoderDataBuffer}, range_codec::RangeDecoder,
+    header_codec::parse_lzma_header,
+    lzma_stream_codec::{data_buffers::DecoderDataBuffer, LZMACodecDecoder},
+    range_codec::RangeDecoder,
 };
 
 fn criterion_benchmark(c: &mut Criterion) {
