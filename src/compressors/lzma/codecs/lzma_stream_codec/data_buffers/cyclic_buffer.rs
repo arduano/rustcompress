@@ -80,19 +80,22 @@ impl<T: Copy + Default> CyclicBuffer<T> {
         let buf = &self.buf;
 
         if self.pos < buf.len() as u64 {
-            // Make sure the first is the empty one, as that's relevant in future functions
-            (&[], &buf[..self.pos as usize])
+            // Make sure the second is the empty one, as that's relevant in future functions
+            (&buf[..self.pos as usize], &[])
         } else {
             let index = (self.pos % buf.len() as u64) as usize;
             (&buf[index..], &buf[..index])
         }
     }
 
-    /// Return the array as 2 slices that are contiguous in memory after the specified offset
+    /// Return the array as 2 slices that are contiguous in memory after the specified offset.
+    ///
+    /// The backwards_offset byte is exclusive of the returned slice, so the slice starts *after* backwards_offset.
     pub fn as_slices_after(&self, backwards_offset: usize) -> (&[T], &[T]) {
         let buf = &self.buf;
         let index = (self.pos % buf.len() as u64) as usize;
 
+        #[cfg(debug_assertions)]
         if backwards_offset > self.pos as usize {
             panic!(
                 "backwards_offset: {}, self.pos: {}",
@@ -100,6 +103,7 @@ impl<T: Copy + Default> CyclicBuffer<T> {
             );
         }
 
+        #[cfg(debug_assertions)]
         if backwards_offset > buf.len() {
             panic!(
                 "backwards_offset: {}, buf.len(): {}",

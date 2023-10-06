@@ -167,7 +167,7 @@ impl MatchFinder for HC4MatchFinder {
             let val = current_match?;
 
             let delta = lz_pos - val;
-            if delta < self.chain.len() as u32 {
+            if delta + 1 < self.chain.len() as u32 {
                 current_match = Some(*self.chain.get_backwards(delta as usize + 1));
                 Some(delta)
             } else {

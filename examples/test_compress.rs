@@ -96,8 +96,6 @@ fn main() {
 
     rc.finish().unwrap();
 
-    dbg!(&compressed);
-
     let mut reader = Cursor::new(&compressed);
 
     let mut out_buffer = DecoderDataBuffer::new(header.dict_size, header.uncompressed_size);

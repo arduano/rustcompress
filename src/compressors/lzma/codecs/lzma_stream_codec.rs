@@ -341,6 +341,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
     ) -> std::io::Result<()> {
         let state = self.codec.state.get() as usize;
 
+        // Store the value as we're swapping array elements around
         let rep_value = self.codec.reps[rep as usize];
 
         if rep == 0 {
