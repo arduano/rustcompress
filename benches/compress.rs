@@ -1,22 +1,18 @@
-use std::{
-    io::{Cursor, Write},
-    time::Duration,
-};
+use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
 use rustcompress::compressors::lzma::codecs::{
-    header_codec::{parse_lzma_header, LzmaHeader, LzmaHeaderProps},
+    header_codec::{LzmaHeader, LzmaHeaderProps},
     length_codec::MATCH_LEN_MAX,
     lzma_stream_codec::{
-        data_buffers::DecoderDataBuffer,
         encoders::{
             instructions_fast::LZMAFastInstructionPicker, match_finding::hc4::HC4MatchFinder,
             LZMAEncoderInput,
         },
-        LZMACodecDecoder, LZMACodecEncoder,
+        LZMACodecEncoder,
     },
-    range_codec::{RangeDecoder, RangeEncoder},
+    range_codec::RangeEncoder,
 };
 
 fn criterion_benchmark(c: &mut Criterion) {

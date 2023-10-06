@@ -127,7 +127,6 @@ impl EncoderDataBuffer {
             let src = src[i];
             let dst = dst[i];
 
-            let mut j = 0;
             let max = (len - passed).min(src.len() as u32).min(dst.len() as u32);
             let max = max as usize;
 
