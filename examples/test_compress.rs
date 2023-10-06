@@ -74,6 +74,10 @@ fn main() {
         let offset = forward_before - forward_after;
         dbg!(String::from_utf8_lossy(&data[passed..passed + offset]));
         passed += offset;
+
+        // if passed > 150 {
+        //     return;
+        // }
     }
 
     while encoder_buffer.forward_bytes() > 0 {

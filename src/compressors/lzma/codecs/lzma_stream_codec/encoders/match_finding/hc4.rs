@@ -107,7 +107,10 @@ impl MatchFinder for HC4MatchFinder {
 
         // Check if the byte at the current position matches the byte delta2 positions behind it.
         // If so, update the best match length and add a new match to the output vector.
-        if delta2 < self.chain.len() as u32 && buffer.do_bytes_match_at(delta2, 0) {
+        if delta2 < self.chain.len() as u32
+            && buffer.do_bytes_match_at(delta2, 0)
+            && buffer.do_bytes_match_at(delta2, 1)
+        {
             len_best = 2;
             output_matches_vec.push(Match {
                 distance: delta2,
@@ -123,6 +126,8 @@ impl MatchFinder for HC4MatchFinder {
         if latest_delta != delta3
             && delta3 < self.chain.len() as u32
             && buffer.do_bytes_match_at(delta3, 0)
+            && buffer.do_bytes_match_at(delta3, 1)
+            && buffer.do_bytes_match_at(delta3, 2)
         {
             len_best = 3;
             output_matches_vec.push(Match {

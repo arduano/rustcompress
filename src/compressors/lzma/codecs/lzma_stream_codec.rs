@@ -234,6 +234,8 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
                     self.literal_encoder
                         .encode_matched(rc, symbol, prev_byte, pos as u32, match_byte)?
                 }
+
+                self.codec.state.update_literal();
             }
             EncodeInstruction::Match(match_) => {
                 rc.encode_bit(is_match_prob, 1)?;
@@ -329,6 +331,8 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
     ) -> std::io::Result<()> {
         let state = self.codec.state.get() as usize;
 
+        let rep_value = self.codec.reps[rep as usize];
+
         if rep == 0 {
             let rep0_prob = &mut self.codec.is_rep0_probs[state];
             rc.encode_bit(rep0_prob, 0)?;
@@ -355,7 +359,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
             }
 
             self.codec.reps[1] = self.codec.reps[0];
-            self.codec.reps[0] = self.codec.reps[rep as usize];
+            self.codec.reps[0] = rep_value;
         }
 
         if len == 1 {
@@ -400,21 +404,23 @@ impl LZMACodecDecoder {
 
         if bit == 0 {
             // TODO: Split this out into a function, same with encode
-            let byte = if self.codec.state.is_literal() {
-                let last_byte = if output.is_empty() {
-                    0
-                } else {
-                    output.get_byte(0)
-                };
 
+            let last_byte = if output.is_empty() {
+                0
+            } else {
+                output.get_byte(0)
+            };
+
+            let byte = if self.codec.state.is_literal() {
                 self.literal_decoder
                     .decode_normal(rc, last_byte, output.position() as usize)?
             } else {
+                let prev_match_byte = output.get_byte(self.codec.reps[0]);
                 self.literal_decoder.decode_matched(
                     rc,
-                    output.get_byte(0),
+                    last_byte,
                     output.position() as usize,
-                    output.get_byte(self.codec.reps[0]),
+                    prev_match_byte,
                 )?
             };
 
