@@ -1,4 +1,5 @@
 use super::{
+    codecs::length_codec::MATCH_LEN_MAX,
     data_buffers::EncoderDataBuffer,
     match_finding::{Match, MatchFinder},
     LZMACoderState,
@@ -36,16 +37,23 @@ impl<M: MatchFinder> LZMAEncoderInput<M> {
             match_finder,
             matches_calculated: false,
 
-            // We allow up to 1/4th of the dict to be kept as redundant data before we shift
-            // the buffer (which is expensive).
-            buffer: EncoderDataBuffer::new(dict_size / 4), // TODO: I guessed this value, should be tested
+            // TODO: Investigate `MATCH_LEN_MAX * 10`. It means that the maximum forwards bytes would be
+            // 10 times the maximum match length, which lets us do less buffer copy operations
+            // when feeding input data.
+            buffer: EncoderDataBuffer::new(dict_size, MATCH_LEN_MAX as u32 * 10),
 
             dict_size,
         }
     }
 
+    /// The number of free bytes that could safely be appended without overwriting the dictionary
+    pub fn available_append_bytes(&self) -> usize {
+        self.buffer.available_append_bytes()
+    }
+
+    /// Appends bytes to the end of the buffer. The length of the slice MUST be smaller or equal to self.available_append_bytes().
     pub fn append_data(&mut self, data: &[u8]) {
-        self.buffer.append_data(data, self.dict_size);
+        self.buffer.append_data(data);
     }
 
     pub fn buffer(&self) -> &EncoderDataBuffer {

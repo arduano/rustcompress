@@ -23,20 +23,17 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
         input: &mut LZMAEncoderInput<impl MatchFinder>,
         state: &LZMACoderState,
     ) -> EncodeInstruction {
-        let avail = input
-            .buffer()
-            .available_bytes_forward()
-            .min(MATCH_LEN_MAX as u32);
+        let avail = input.buffer().forwards_bytes().min(MATCH_LEN_MAX);
 
         // If there aren't enough bytes to encode a match, just return None
-        if avail < MATCH_LEN_MIN as u32 {
+        if avail < MATCH_LEN_MIN {
             return EncodeInstruction::Literal;
         }
 
         // Cache the lengths as they're used multiple times
         let rep_lens = state
             .reps
-            .map(|rep| input.buffer().get_match_length(rep, avail));
+            .map(|rep| input.buffer().get_match_length(rep, avail as u32));
 
         let mut best_rep_len = 0;
         let mut best_rep_index = 0;

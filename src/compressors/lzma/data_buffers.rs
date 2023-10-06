@@ -7,81 +7,108 @@ mod cyclic_buffer;
 // TODO: Port EncoderDataBuffer to use CyclicBuffer
 
 pub struct EncoderDataBuffer {
-    read_pos: u32,
-    buf: Vec<u8>,
-
-    /// The interval at which we should trim the buffer. We can't trim it too often because that
-    /// would be slow, but we also can't trim it too rarely because that would waste memory.
-    trim_interval: u32,
+    compress_pos: u64,
+    max_forwards_bytes: u32,
+    dict_size: u32,
+    buf: CyclicBuffer<u8>,
 }
 
 impl EncoderDataBuffer {
-    pub fn new(trim_interval: u32) -> Self {
+    pub fn new(dict_size: u32, max_forwards_bytes: u32) -> Self {
+        // max_forwards_bytes is the number of extra bytes that should be stored on top of the dict_size.
+        // It is used to find matches, so the minimum forward_bytes should be the maximum match size.
+        // However, bigger max_forwards_bytes means less data copying is needed so it may be faster.
         Self {
-            read_pos: 0,
-            buf: Vec::new(),
-            trim_interval,
+            buf: CyclicBuffer::new((dict_size + max_forwards_bytes) as usize),
+            compress_pos: 0 as u64,
+            max_forwards_bytes,
+            dict_size,
         }
     }
 
-    pub fn append_data(&mut self, input: &[u8], backward_bytes_to_keep: u32) {
-        self.buf.extend_from_slice(input);
+    /// The number of bytes ahead that are currently in the buffer
+    pub fn forwards_bytes(&self) -> usize {
+        (self.buf.pos() - self.compress_pos) as usize
+    }
 
-        if self.read_pos > backward_bytes_to_keep {
-            // We need to try trimming the buffer if we have more than backward_bytes_to_keep bytes
-            let data_to_trim = self.read_pos - backward_bytes_to_keep;
+    /// The number of dictionary bytes. Can be higher than dict_size if fowards_bytes() is smaller than max_forwards_bytes.
+    pub fn backwards_bytes(&self) -> usize {
+        self.buf.capacity() - self.forwards_bytes()
+    }
 
-            if data_to_trim > self.trim_interval {
-                // Get the next multiple of shift_interval
-                let data_to_trim = data_to_trim - (data_to_trim % self.trim_interval);
+    /// The number of free bytes that could safely be appended without overwriting the dictionary
+    pub fn available_append_bytes(&self) -> usize {
+        self.max_forwards_bytes as usize - self.forwards_bytes()
+    }
 
-                self.buf.drain(0..data_to_trim as usize);
-                self.read_pos -= data_to_trim;
-            }
+    /// Appends bytes to the end of the buffer. The length of the slice MUST be smaller or equal to self.available_append_bytes().
+    pub fn append_data(&mut self, input: &[u8]) {
+        if input.len() > self.available_append_bytes() {
+            panic!(
+                "input.len(): {}, available_append_bytes(): {}",
+                input.len(),
+                self.available_append_bytes()
+            );
         }
-    }
 
-    pub fn available_bytes_forward(&self) -> u32 {
-        self.buf.len() as u32 - self.read_pos
-    }
-
-    pub fn available_bytes_back(&self) -> u32 {
-        self.buf.len() as u32
+        self.buf.push_slice(input)
     }
 
     pub fn skip(&mut self, len: u32) {
-        self.read_pos += len;
+        debug_assert!(
+            len <= self.forwards_bytes() as u32,
+            "len: {}, forwards_bytes(): {}",
+            len,
+            self.forwards_bytes()
+        );
+
+        self.compress_pos += len as u64;
     }
 
     pub fn increment_pos(&mut self) {
-        self.read_pos += 1;
+        debug_assert!(
+            self.forwards_bytes() > 0,
+            "forwards_bytes(): {}",
+            self.forwards_bytes()
+        );
+
+        self.compress_pos += 1;
     }
 
     pub fn get_byte(&self, offset: i32) -> u8 {
-        debug_assert!(
-            (offset + self.read_pos as i32) >= 0,
-            "offset: {}, read_pos: {}",
-            offset,
-            self.read_pos
-        );
-
-        self.buf[(self.read_pos as i32 + offset) as usize]
+        self.buf
+            .get_relative((self.forwards_bytes() as i32 - offset) as usize)
     }
 
-    pub fn do_bytes_match(&self, delta: u32, len: u32) -> bool {
+    pub fn do_bytes_match_at(&self, delta: u32, len: u32) -> bool {
         debug_assert!(
-            (self.read_pos as i32 - delta as i32) as i32 >= 0,
-            "delta: {}, read_pos: {}",
+            delta as usize <= self.backwards_bytes(),
+            "delta: {}, backwards_bytes(): {}",
             delta,
-            self.read_pos
+            self.backwards_bytes()
         );
 
-        self.get_byte(len as i32 - delta as i32) == self.get_byte(len as i32)
+        debug_assert!(
+            (len as usize) < self.forwards_bytes(),
+            "len: {}, forwards_bytes(): {}",
+            len,
+            self.forwards_bytes()
+        );
+
+        let zero_offset = self.forwards_bytes();
+        let front_pos = zero_offset - len as usize;
+        let back_pos = front_pos + delta as usize;
+
+        let front = self.buf.get_relative(front_pos);
+        let back = self.buf.get_relative(back_pos);
+
+        front == back
     }
 
     pub fn get_match_length(&self, delta: u32, max_len: u32) -> u32 {
         let mut len = 0;
-        while len < max_len && self.do_bytes_match(delta, len) {
+        // TODO: Optimize this with fetching entire slices at once and comparing
+        while len < max_len && self.do_bytes_match_at(delta, len) {
             len += 1;
         }
 
@@ -126,7 +153,10 @@ impl DecoderDataBuffer {
             self.buf.capacity()
         );
 
-        if len > dist {
+        let overlaps_head = len > dist;
+        let overlaps_tail = self.buf.max_capacity() as u32 - dist > len;
+
+        if overlaps_head || overlaps_tail {
             for _ in 0..len {
                 let byte = self.buf.get_relative(dist as usize);
                 self.buf.push(byte);

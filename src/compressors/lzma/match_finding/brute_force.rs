@@ -32,9 +32,9 @@ impl MatchFinder for BruteForceMatchFinder {
     ) {
         output_matches_vec.clear();
 
-        let read_len = buffer.available_bytes_forward() as usize;
+        let read_len = buffer.forwards_bytes() as usize;
 
-        let dict_size = self.dict_size.min(buffer.available_bytes_back());
+        let dict_size = self.dict_size.min(buffer.backwards_bytes() as u32);
 
         let start = -(dict_size as i32);
         for i in start..0 {
@@ -51,7 +51,6 @@ impl MatchFinder for BruteForceMatchFinder {
             }
 
             if len >= 2 {
-                dbg!(buffer.get_byte(i), buffer.get_byte(0));
                 output_matches_vec.push(Match {
                     distance: -i as u32 - 1,
                     len: len as u32,

@@ -27,6 +27,10 @@ impl<T: Copy + Default> CyclicBuffer<T> {
         self.pos.min(self.buf.len() as u64) as usize
     }
 
+    pub fn max_capacity(&self) -> usize {
+        self.buf.len()
+    }
+
     pub fn get(&self, pos: u64) -> T {
         if pos >= self.pos {
             panic!("pos: {}, self.pos: {}", pos, self.pos);
@@ -53,7 +57,7 @@ impl<T: Copy + Default> CyclicBuffer<T> {
             );
         }
 
-        if self.pos < backwards_offset as u64 {
+        if self.pos <= backwards_offset as u64 {
             panic!(
                 "self.pos: {}, backwards_offset: {}",
                 self.pos, backwards_offset
@@ -132,6 +136,21 @@ impl<T: Copy + Default> CyclicBuffer<T> {
         let index = (self.pos % self.buf.len() as u64) as usize;
         self.buf[index] = val;
         self.pos += 1;
+    }
+
+    pub fn push_slice(&mut self, val: &[T]) {
+        let mut index = (self.pos % self.buf.len() as u64) as usize;
+        let mut written = 0;
+        while written < val.len() {
+            let distance_to_end = self.buf.len() - index;
+            let to_write = distance_to_end.min(val.len() - written);
+
+            self.buf[index..(index + to_write)]
+                .copy_from_slice(&val[written..(written + to_write)]);
+            written += to_write;
+        }
+
+        self.pos += val.len() as u64;
     }
 
     /// Append the buffer range from the specified offsets to the end of the buffer.
