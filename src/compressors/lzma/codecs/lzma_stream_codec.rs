@@ -211,8 +211,6 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
 
         let instruction = self.get_next_instruction(input);
 
-        dbg!(&instruction);
-
         let is_match_prob = &mut self.codec.is_match_probs[state_idx][pos_state as usize];
 
         match instruction {
