@@ -32,10 +32,12 @@ impl<T: Copy + Default> CyclicBuffer<T> {
     }
 
     pub fn get(&self, pos: u64) -> T {
+        #[cfg(debug_assertions)]
         if pos >= self.pos {
             panic!("pos: {}, self.pos: {}", pos, self.pos);
         }
 
+        #[cfg(debug_assertions)]
         if self.pos - pos > self.buf.len() as u64 {
             panic!(
                 "pos: {}, self.pos: {}, self.buf.len(): {}",
@@ -49,6 +51,7 @@ impl<T: Copy + Default> CyclicBuffer<T> {
     }
 
     pub fn get_relative(&self, backwards_offset: usize) -> T {
+        #[cfg(debug_assertions)]
         if backwards_offset > self.buf.len() {
             panic!(
                 "backwards_offset: {}, self.buf.len(): {}",
@@ -57,6 +60,7 @@ impl<T: Copy + Default> CyclicBuffer<T> {
             );
         }
 
+        #[cfg(debug_assertions)]
         if self.pos <= backwards_offset as u64 {
             panic!(
                 "self.pos: {}, backwards_offset: {}",

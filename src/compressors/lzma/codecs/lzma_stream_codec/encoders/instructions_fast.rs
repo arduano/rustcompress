@@ -41,7 +41,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
         // Cache the lengths as they're used multiple times
         let rep_lens = state
             .reps
-            .map(|rep| input.buffer().get_match_length(rep, avail as u32));
+            .map(|rep| input.buffer().get_match_length(0, rep, avail as u32));
 
         let mut best_rep_len = 0;
         let mut best_rep_index = 0;

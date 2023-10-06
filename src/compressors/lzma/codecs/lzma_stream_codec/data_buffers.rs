@@ -79,10 +79,14 @@ impl EncoderDataBuffer {
         self.compress_pos += 1;
     }
 
+    /// Index of the offset for the underlying cyclical buffer
+    pub fn get_byte_index(&self, offset: i32) -> usize {
+        (self.forwards_bytes() as i32 - offset - 1) as usize
+    }
+
     /// Get the byte with offset relative to the compress reader head. 0 is the next unread byte.
     pub fn get_byte(&self, offset: i32) -> u8 {
-        self.buf
-            .get_relative((self.forwards_bytes() as i32 - offset - 1) as usize)
+        self.buf.get_relative(self.get_byte_index(offset))
     }
 
     /// Check if bytes ahead match bytes backwards at a certain delta.
@@ -109,16 +113,111 @@ impl EncoderDataBuffer {
         front == back
     }
 
-    pub fn get_match_length(&self, delta: u32, max_len: u32) -> u32 {
-        let mut len = 0;
+    pub fn is_match_at_least_longer_than(&self, delta: u32, len: u32) -> bool {
+        let src_index = self.get_byte_index(0);
+        let src = self.buf.as_slices_after(src_index + 1);
+        let dst_index = self.get_byte_index(-(delta as i32) - 1);
+        let dst = self.buf.as_slices_after(dst_index + 1);
 
-        // TODO: Optimize this with fetching entire slices at once and comparing
-        while len < max_len && self.do_bytes_match_at(delta, len) {
-            len += 1;
+        let (src, dst) = align_slices(src, dst);
+
+        let mut passed = 0;
+
+        for i in 0..3 {
+            let src = src[i];
+            let dst = dst[i];
+
+            let mut j = 0;
+            let max = (len - passed).min(src.len() as u32).min(dst.len() as u32);
+            let max = max as usize;
+
+            if src[..max] != dst[..max] {
+                return false;
+            }
+
+            passed += max as u32;
+            if passed >= len {
+                break;
+            }
+        }
+
+        true
+    }
+
+    pub fn get_match_length(&self, start_len: u32, delta: u32, max_len: u32) -> u32 {
+        // The below code is equivalent to
+        //
+        // ```
+        // let mut len = 0;
+        // while len < max_len && self.do_bytes_match_at(delta, len) {
+        //     len += 1;
+        // }
+        // len
+        // ```
+        //
+        // Except it loops over slices directly, making this much more auto-SIMD friendly
+
+        let mut len = start_len;
+
+        let src_index = self.get_byte_index(start_len as i32);
+        let src = self.buf.as_slices_after(src_index + 1);
+        let dst_index = self.get_byte_index(-(delta as i32) + (start_len as i32) - 1);
+        let dst = self.buf.as_slices_after(dst_index + 1);
+
+        let (src, dst) = align_slices(src, dst);
+
+        'outer: for i in 0..3 {
+            let src = src[i];
+            let dst = dst[i];
+
+            let mut j = 0;
+            let max = (max_len - len).min(src.len() as u32).min(dst.len() as u32);
+
+            while j < max as usize {
+                if src[j] != dst[j] {
+                    len += j as u32;
+                    break 'outer;
+                }
+
+                j += 1;
+            }
+
+            len += j as u32;
         }
 
         len
     }
+}
+
+/// Given two pairs of slices, split and align them both into [&[T]; 3] each so that
+/// the first two slices are the same length and the last slice is the remainder.
+///
+/// This is useful for quickly checking matches on contiguous bytes in memory.
+fn align_slices<'a, T>(
+    mut left: (&'a [T], &'a [T]),
+    mut right: (&'a [T], &'a [T]),
+) -> ([&'a [T]; 3], [&'a [T]; 3]) {
+    // Let's assume that the left one is always smaller for the below code to work
+    if left.0.len() > right.0.len() {
+        std::mem::swap(&mut left, &mut right);
+    }
+
+    let length_diff = right.0.len() - left.0.len();
+    let length_diff = length_diff.min(left.1.len());
+
+    let left_1 = left.0;
+    let right_1 = &right.0[..left_1.len()];
+
+    let left_2 = &left.1[..length_diff];
+    let right_2 = &right.0[left_1.len()..];
+
+    let left_3 = &left.1[length_diff..];
+    let right_3 = right.1;
+
+    let left = [left_1, left_2, left_3];
+    let right = [right_1, right_2, right_3];
+
+    (left, right)
 }
 
 pub struct DecoderDataBuffer {
@@ -220,5 +319,74 @@ impl DecoderDataBuffer {
         self.flushed_pos += bytes_to_flush as u64;
 
         bytes_to_flush
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_align_slices() {
+        let left = (&[1, 2, 3][..], &[4, 5, 6, 7][..]);
+        let right = (&[8, 9, 10, 11][..], &[12, 13, 14][..]);
+
+        let (left, right) = align_slices(left, right);
+
+        assert_eq!(left[0], &[1, 2, 3][..]);
+        assert_eq!(left[1], &[4][..]);
+        assert_eq!(left[2], &[5, 6, 7][..]);
+
+        assert_eq!(right[0], &[8, 9, 10][..]);
+        assert_eq!(right[1], &[11][..]);
+        assert_eq!(right[2], &[12, 13, 14][..]);
+    }
+
+    #[test]
+    fn test_align_slices_left_longer() {
+        let left = (&[1, 2, 3][..], &[4, 5, 6, 7, 8, 9][..]);
+        let right = (&[8, 9, 10, 11][..], &[12][..]);
+
+        let (left, right) = align_slices(right, left);
+
+        assert_eq!(left[0], &[1, 2, 3][..]);
+        assert_eq!(left[1], &[4][..]);
+        assert_eq!(left[2], &[5, 6, 7, 8, 9][..]);
+
+        assert_eq!(right[0], &[8, 9, 10][..]);
+        assert_eq!(right[1], &[11][..]);
+        assert_eq!(right[2], &[12][..]);
+    }
+
+    #[test]
+    fn test_align_slices_right_longer() {
+        let left = (&[1, 2, 3][..], &[4][..]);
+        let right = (&[8, 9, 10, 11][..], &[12, 13, 14, 15][..]);
+
+        let (left, right) = align_slices(right, left);
+
+        assert_eq!(left[0], &[1, 2, 3][..]);
+        assert_eq!(left[1], &[4][..]);
+        assert_eq!(left[2], &[][..]);
+
+        assert_eq!(right[0], &[8, 9, 10][..]);
+        assert_eq!(right[1], &[11][..]);
+        assert_eq!(right[2], &[12, 13, 14, 15][..]);
+    }
+
+    #[test]
+    fn test_align_slices_left_empty() {
+        let left = (&[][..], &[][..]);
+        let right = (&[1, 2][..], &[3, 4][..]);
+
+        let (left, right) = align_slices(right, left);
+
+        assert_eq!(left[0], &[][..]);
+        assert_eq!(left[1], &[][..]);
+        assert_eq!(left[2], &[][..]);
+
+        assert_eq!(right[0], &[][..]);
+        assert_eq!(right[1], &[1, 2][..]);
+        assert_eq!(right[2], &[3, 4][..]);
     }
 }

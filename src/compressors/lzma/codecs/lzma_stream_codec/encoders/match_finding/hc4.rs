@@ -107,10 +107,7 @@ impl MatchFinder for HC4MatchFinder {
 
         // Check if the byte at the current position matches the byte delta2 positions behind it.
         // If so, update the best match length and add a new match to the output vector.
-        if delta2 < self.chain.len() as u32
-            && buffer.do_bytes_match_at(delta2, 0)
-            && buffer.do_bytes_match_at(delta2, 1)
-        {
+        if delta2 < self.chain.len() as u32 && buffer.is_match_at_least_longer_than(delta2, 2) {
             len_best = 2;
             output_matches_vec.push(Match {
                 distance: delta2,
@@ -125,9 +122,7 @@ impl MatchFinder for HC4MatchFinder {
         // Set delta2 to delta3 to check for longer matches in the next iteration.
         if latest_delta != delta3
             && delta3 < self.chain.len() as u32
-            && buffer.do_bytes_match_at(delta3, 0)
-            && buffer.do_bytes_match_at(delta3, 1)
-            && buffer.do_bytes_match_at(delta3, 2)
+            && buffer.is_match_at_least_longer_than(delta3, 3)
         {
             len_best = 3;
             output_matches_vec.push(Match {
@@ -141,9 +136,7 @@ impl MatchFinder for HC4MatchFinder {
         // If so, increment the best match length until it reaches the match length limit or the bytes no longer match.
         // If the best match length is long enough, return from the function.
         if output_matches_vec.len() > 0 {
-            while len_best < max_match_len && buffer.do_bytes_match_at(latest_delta, len_best) {
-                len_best += 1;
-            }
+            len_best = buffer.get_match_length(len_best, latest_delta, max_match_len);
 
             let last = output_matches_vec.last_mut().unwrap();
             last.len = len_best;
@@ -188,10 +181,8 @@ impl MatchFinder for HC4MatchFinder {
 
             if buffer.do_bytes_match_at(delta, len_best) && buffer.do_bytes_match_at(delta, 0) {
                 // Calculate the length of the match.
-                let mut len = 1;
-                while len < max_match_len && buffer.do_bytes_match_at(delta, len) {
-                    len += 1;
-                }
+
+                let len = buffer.get_match_length(1, delta, max_match_len);
 
                 // Use the match if and only if it is better than the longest
                 // match found so far.
