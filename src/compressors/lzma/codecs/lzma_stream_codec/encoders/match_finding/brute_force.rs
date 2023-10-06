@@ -43,9 +43,9 @@ impl MatchFinder for BruteForceMatchFinder {
             }
 
             let mut len = 0;
-            while len + 1 < read_len
-                && len + 1 < self.max_match_len as usize
-                && buffer.get_byte(i + len as i32 + 1) == buffer.get_byte(len as i32 + 1)
+            while len < read_len
+                && len < self.max_match_len as usize
+                && buffer.get_byte(i + len as i32) == buffer.get_byte(len as i32)
             {
                 len += 1;
             }

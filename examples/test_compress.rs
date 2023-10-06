@@ -121,4 +121,6 @@ fn main() {
 
     println!("{}", String::from_utf8_lossy(&output));
     dbg!(flushed);
+
+    assert_eq!(data, &output[..]);
 }

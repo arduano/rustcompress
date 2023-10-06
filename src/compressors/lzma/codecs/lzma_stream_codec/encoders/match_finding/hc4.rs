@@ -141,7 +141,7 @@ impl MatchFinder for HC4MatchFinder {
         // If so, increment the best match length until it reaches the match length limit or the bytes no longer match.
         // If the best match length is long enough, return from the function.
         if output_matches_vec.len() > 0 {
-            while len_best + 1 < max_match_len && buffer.do_bytes_match_at(latest_delta, len_best) {
+            while len_best < max_match_len && buffer.do_bytes_match_at(latest_delta, len_best) {
                 len_best += 1;
             }
 
@@ -189,10 +189,7 @@ impl MatchFinder for HC4MatchFinder {
             if buffer.do_bytes_match_at(delta, len_best) && buffer.do_bytes_match_at(delta, 0) {
                 // Calculate the length of the match.
                 let mut len = 1;
-                while len + 1 < max_match_len {
-                    if !buffer.do_bytes_match_at(delta, len + 1) {
-                        break;
-                    }
+                while len < max_match_len && buffer.do_bytes_match_at(delta, len) {
                     len += 1;
                 }
 
