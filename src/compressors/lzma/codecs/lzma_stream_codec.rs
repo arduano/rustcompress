@@ -215,25 +215,9 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
 
         match instruction {
             EncodeInstruction::Literal => {
-                let length = instruction.length() as i32;
-
                 rc.encode_bit(is_match_prob, 0)?;
 
-                let symbol = input.buffer().get_byte(0 - length);
-                let prev_byte = input.buffer().get_byte(-1 - length);
-
-                if self.codec.state.is_literal() {
-                    self.literal_encoder
-                        .encode_normal(rc, symbol, prev_byte, pos as u32)?
-                } else {
-                    let match_byte = input
-                        .buffer()
-                        .get_byte(-(self.codec.reps[0] as i32) - 1 - length);
-                    self.literal_encoder
-                        .encode_matched(rc, symbol, prev_byte, pos as u32, match_byte)?
-                }
-
-                self.codec.state.update_literal();
+                self.encode_literal(rc, input, pos as u32)?;
             }
             EncodeInstruction::Match(match_) => {
                 rc.encode_bit(is_match_prob, 1)?;
@@ -252,6 +236,34 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
                 self.encode_rep_match(rc, rep_index as _, len, pos_state)?;
             }
         }
+
+        Ok(())
+    }
+
+    fn encode_literal(
+        &mut self,
+        rc: &mut RangeEncoder<impl Write>,
+        input: &mut LZMAEncoderInput<impl MatchFinder>,
+        pos: u32,
+    ) -> io::Result<()> {
+        // The length of the literal is always 1
+        let length = 1;
+
+        let symbol = input.buffer().get_byte(0 - length);
+        let prev_byte = input.buffer().get_byte(-1 - length);
+
+        if self.codec.state.is_literal() {
+            self.literal_encoder
+                .encode_normal(rc, symbol, prev_byte, pos)?
+        } else {
+            let match_byte = input
+                .buffer()
+                .get_byte(-(self.codec.reps[0] as i32) - 1 - length);
+            self.literal_encoder
+                .encode_matched(rc, symbol, prev_byte, pos, match_byte)?
+        }
+
+        self.codec.state.update_literal();
 
         Ok(())
     }
@@ -401,29 +413,7 @@ impl LZMACodecDecoder {
         let bit = rc.decode_bit(prob)?;
 
         if bit == 0 {
-            // TODO: Split this out into a function, same with encode
-
-            let last_byte = if output.is_empty() {
-                0
-            } else {
-                output.get_byte(0)
-            };
-
-            let byte = if self.codec.state.is_literal() {
-                self.literal_decoder
-                    .decode_normal(rc, last_byte, output.position() as usize)?
-            } else {
-                let prev_match_byte = output.get_byte(self.codec.reps[0]);
-                self.literal_decoder.decode_matched(
-                    rc,
-                    last_byte,
-                    output.position() as usize,
-                    prev_match_byte,
-                )?
-            };
-
-            output.append_byte(byte);
-            self.codec.state.update_literal();
+            self.decode_literal(rc, output)?;
         } else {
             let prob = &mut self.codec.is_rep_probs[index];
 
@@ -435,6 +425,36 @@ impl LZMACodecDecoder {
 
             output.append_match(match_.distance, match_.len);
         }
+
+        Ok(())
+    }
+
+    fn decode_literal(
+        &mut self,
+        rc: &mut RangeDecoder<impl Read>,
+        output: &mut DecoderDataBuffer,
+    ) -> io::Result<()> {
+        let last_byte = if output.is_empty() {
+            0
+        } else {
+            output.get_byte(0)
+        };
+
+        let byte = if self.codec.state.is_literal() {
+            self.literal_decoder
+                .decode_normal(rc, last_byte, output.position() as usize)?
+        } else {
+            let prev_match_byte = output.get_byte(self.codec.reps[0]);
+            self.literal_decoder.decode_matched(
+                rc,
+                last_byte,
+                output.position() as usize,
+                prev_match_byte,
+            )?
+        };
+
+        output.append_byte(byte);
+        self.codec.state.update_literal();
 
         Ok(())
     }
