@@ -15,6 +15,12 @@ pub struct LZMAFastInstructionPicker {
     nice_len: u32,
 }
 
+impl LZMAFastInstructionPicker {
+    pub fn new(nice_len: u32) -> Self {
+        Self { nice_len }
+    }
+}
+
 /// Returns true if the distance is shorter than 1/128th of the big distance,
 /// which
 fn is_distance_sufficiently_shorter(small_dist: u32, big_dist: u32) -> bool {
@@ -65,7 +71,6 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
         let mut main_dist = 0;
 
         let matches = input.calc_matches();
-
         if matches.len() > 0 {
             let main = *matches.last().unwrap();
 

@@ -8,7 +8,7 @@ use rustcompress::compressors::lzma::codecs::{
 };
 
 fn main() {
-    let data = include_bytes!("./test.rs");
+    let data = include_bytes!("./test_decompress.rs");
 
     let mut compressed = Vec::new();
 

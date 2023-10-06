@@ -1,5 +1,5 @@
 pub mod data_buffers;
-mod encoders;
+pub mod encoders;
 mod state;
 
 use std::io::{self, Read, Write};
@@ -177,6 +177,7 @@ impl LZMACodecDecoder {
         let bit = rc.decode_bit(prob)?;
 
         if bit == 0 {
+            // TODO: Split this out into a function, same with encode
             let byte = if self.codec.state.is_literal() {
                 let last_byte = if output.is_empty() {
                     0
@@ -356,11 +357,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
 
         let instruction = self.picker.get_next_symbol(input, &self.codec);
 
-        let bytes_to_encode = match instruction {
-            EncodeInstruction::Literal => 1,
-            EncodeInstruction::Match(match_) => match_.len,
-            EncodeInstruction::Rep { len, .. } => len,
-        };
+        let bytes_to_encode = instruction.length();
 
         let new_pos = pos + bytes_to_encode as u64;
         if input.pos() > new_pos {
@@ -379,27 +376,33 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
         rc: &mut RangeEncoder<impl Write>,
         input: &mut LZMAEncoderInput<impl MatchFinder>,
     ) -> io::Result<()> {
-        let pos = input.pos();
+        let pos = input.pos() - input.dict_size() as u64;
 
         let pos_state = pos as u32 & self.codec.pos_mask;
         let state_idx = self.codec.state.get() as usize;
 
         let instruction = self.get_next_instruction(input);
 
+        dbg!(&instruction);
+
         let is_match_prob = &mut self.codec.is_match_probs[state_idx][pos_state as usize];
 
         match instruction {
             EncodeInstruction::Literal => {
+                let length = instruction.length() as i32;
+
                 rc.encode_bit(is_match_prob, 0)?;
 
-                let symbol = input.buffer().get_byte(0);
-                let prev_byte = input.buffer().get_byte(-1);
+                let symbol = input.buffer().get_byte(0 - length);
+                let prev_byte = input.buffer().get_byte(-1 - length);
 
                 if self.codec.state.is_literal() {
                     self.literal_encoder
                         .encode_normal(rc, symbol, prev_byte, pos as u32)?
                 } else {
-                    let match_byte = input.buffer().get_byte(self.codec.reps[0] as i32);
+                    let match_byte = input
+                        .buffer()
+                        .get_byte(-(self.codec.reps[0] as i32) - 1 - length);
                     self.literal_encoder
                         .encode_matched(rc, symbol, prev_byte, pos as u32, match_byte)?
                 }

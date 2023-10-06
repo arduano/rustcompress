@@ -11,10 +11,10 @@
 //!
 //! ### Probability Modeling
 //!
-//! This implementation utilizes `RangeEncProbability`, an adaptive model
-//! that tracks the occurrence probabilities of symbols. As more symbols
-//! are processed, the model is updated, providing more accurate estimates
-//! for future symbols.
+//! This implementation utilizes `RangeEncProbability`, instead of the usual
+//! u16 used in other implementations, to make it more clear what's a
+//! probability. Probabilities are used by the aglrotihm to determine how
+//! likely a given symbol is to occur.
 
 mod price;
 mod probability;

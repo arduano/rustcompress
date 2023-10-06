@@ -23,7 +23,7 @@ fn get_next_4_bytes(buffer: &EncoderDataBuffer) -> [u8; 4] {
         buffer.get_byte(0),
         buffer.get_byte(1),
         buffer.get_byte(2),
-        buffer.get_byte(4),
+        buffer.get_byte(3),
     ]
 }
 
@@ -77,6 +77,8 @@ impl MatchFinder for HC4MatchFinder {
     ) {
         output_matches_vec.clear();
 
+        let lz_pos = self.lz_pos;
+
         self.increment_pos(buffer);
         let avail = buffer.forwards_bytes() as u32;
 
@@ -97,8 +99,8 @@ impl MatchFinder for HC4MatchFinder {
         let positions = self.hash.get_table_values(&index); // Get the delta values at those table indexes
         self.hash.update_tables(&index, self.lz_pos.as_match_pos()); // Update the tables with the new position
 
-        let delta2 = self.lz_pos - positions.hash2_value;
-        let delta3 = self.lz_pos - positions.hash3_value;
+        let delta2 = lz_pos - positions.hash2_value;
+        let delta3 = lz_pos - positions.hash3_value;
         self.chain.push(positions.hash4_value);
 
         let mut len_best = 0;
@@ -108,7 +110,7 @@ impl MatchFinder for HC4MatchFinder {
         if delta2 < self.chain.len() as u32 && buffer.do_bytes_match_at(delta2, 0) {
             len_best = 2;
             output_matches_vec.push(Match {
-                distance: delta2 - 1,
+                distance: delta2,
                 len: 2,
             });
         }
@@ -124,7 +126,7 @@ impl MatchFinder for HC4MatchFinder {
         {
             len_best = 3;
             output_matches_vec.push(Match {
-                distance: delta3 - 1,
+                distance: delta3,
                 len: 3,
             });
             latest_delta = delta3;
@@ -134,9 +136,7 @@ impl MatchFinder for HC4MatchFinder {
         // If so, increment the best match length until it reaches the match length limit or the bytes no longer match.
         // If the best match length is long enough, return from the function.
         if output_matches_vec.len() > 0 {
-            while len_best + 1 < max_match_len
-                && buffer.do_bytes_match_at(latest_delta, len_best + 1)
-            {
+            while len_best + 1 < max_match_len && buffer.do_bytes_match_at(latest_delta, len_best) {
                 len_best += 1;
             }
 
@@ -161,7 +161,7 @@ impl MatchFinder for HC4MatchFinder {
         let chain_delta_iter = std::iter::from_fn(|| {
             let val = current_match?;
 
-            let delta = self.lz_pos - val;
+            let delta = lz_pos - val;
             if delta < self.chain.len() as u32 {
                 current_match = Some(*self.chain.get_backwards(delta as usize + 1));
                 Some(delta)
@@ -197,7 +197,7 @@ impl MatchFinder for HC4MatchFinder {
                     len_best = len;
 
                     output_matches_vec.push(Match {
-                        distance: delta - 1,
+                        distance: delta,
                         len: len,
                     });
 

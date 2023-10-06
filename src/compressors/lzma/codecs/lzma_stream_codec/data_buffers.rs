@@ -103,18 +103,15 @@ impl EncoderDataBuffer {
             self.forwards_bytes()
         );
 
-        let zero_offset = self.forwards_bytes();
-        let front_pos = zero_offset - len as usize;
-        let back_pos = front_pos + delta as usize;
-
-        let front = self.buf.get_relative(front_pos - 1);
-        let back = self.buf.get_relative(back_pos - 1);
+        let front = self.get_byte(len as i32);
+        let back = self.get_byte(len as i32 - delta as i32 - 1);
 
         front == back
     }
 
     pub fn get_match_length(&self, delta: u32, max_len: u32) -> u32 {
         let mut len = 0;
+
         // TODO: Optimize this with fetching entire slices at once and comparing
         while len < max_len && self.do_bytes_match_at(delta, len) {
             len += 1;
