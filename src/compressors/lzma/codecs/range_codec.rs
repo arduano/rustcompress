@@ -35,7 +35,7 @@ const MOVE_BITS: u32 = 5;
 
 const K_TOP_VALUE: u32 = 1 << (32 - SHIFT_BITS);
 
-pub struct RangeEncoder<W> {
+pub struct RangeEncoder<W: Write> {
     low: u64,
     range: u32,
     cache_size: u32,
@@ -136,7 +136,7 @@ impl<W: Write> RangeEncoder<W> {
     }
 }
 
-impl<T> std::ops::Drop for RangeEncoder<T> {
+impl<T: Write> std::ops::Drop for RangeEncoder<T> {
     fn drop(&mut self) {
         if !self.finished {
             panic!("RangeEncoder dropped without being finished");
@@ -144,7 +144,7 @@ impl<T> std::ops::Drop for RangeEncoder<T> {
     }
 }
 
-pub struct RangeDecoder<R> {
+pub struct RangeDecoder<R: Read> {
     stream: R,
     range: u32,
     code: u32,

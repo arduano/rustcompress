@@ -36,6 +36,10 @@ impl EncoderDataBuffer {
         self.buf.capacity() - self.forwards_bytes()
     }
 
+    pub fn pos(&self) -> u64 {
+        self.compress_pos
+    }
+
     /// The number of free bytes that could safely be appended without overwriting the dictionary
     pub fn available_append_bytes(&self) -> usize {
         self.max_forwards_bytes as usize - self.forwards_bytes()
@@ -75,11 +79,15 @@ impl EncoderDataBuffer {
         self.compress_pos += 1;
     }
 
+    /// Get the byte with offset relative to the compress reader head. 0 is the next unread byte.
     pub fn get_byte(&self, offset: i32) -> u8 {
         self.buf
-            .get_relative((self.forwards_bytes() as i32 - offset) as usize)
+            .get_relative((self.forwards_bytes() as i32 - offset - 1) as usize)
     }
 
+    /// Check if bytes ahead match bytes backwards at a certain delta.
+    ///
+    /// TODO: Check if we need to use modulo of the delta/len for cases when len is bigger than delta.
     pub fn do_bytes_match_at(&self, delta: u32, len: u32) -> bool {
         debug_assert!(
             delta as usize <= self.backwards_bytes(),
@@ -99,8 +107,8 @@ impl EncoderDataBuffer {
         let front_pos = zero_offset - len as usize;
         let back_pos = front_pos + delta as usize;
 
-        let front = self.buf.get_relative(front_pos);
-        let back = self.buf.get_relative(back_pos);
+        let front = self.buf.get_relative(front_pos - 1);
+        let back = self.buf.get_relative(back_pos - 1);
 
         front == back
     }

@@ -162,7 +162,6 @@ impl MatchFinder for HC4MatchFinder {
             let val = current_match?;
 
             let delta = self.lz_pos - val;
-            dbg!(delta, self.chain.len());
             if delta < self.chain.len() as u32 {
                 current_match = Some(*self.chain.get_backwards(delta as usize + 1));
                 Some(delta)
@@ -181,10 +180,6 @@ impl MatchFinder for HC4MatchFinder {
                 // Skip it.
                 continue;
             }
-
-            dbg!(delta);
-            dbg!(max_match_len);
-            dbg!(len_best);
 
             if buffer.do_bytes_match_at(delta, len_best) && buffer.do_bytes_match_at(delta, 0) {
                 // Calculate the length of the match.

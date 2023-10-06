@@ -107,7 +107,7 @@ impl LiteralCodecEncoder {
         rc: &mut RangeEncoder<W>,
         symbol: u8,
         prev_byte: u8,
-        pos: usize,
+        pos: u32,
     ) -> io::Result<()> {
         let subcoder = self.codec.get_subcoder(prev_byte as u32, pos as u32);
         subcoder.encode_normal_literal(rc, symbol)
@@ -118,7 +118,7 @@ impl LiteralCodecEncoder {
         rc: &mut RangeEncoder<W>,
         symbol: u8,
         prev_byte: u8,
-        pos: usize,
+        pos: u32,
         match_byte: u8,
     ) -> io::Result<()> {
         let subcoder = self.codec.get_subcoder(prev_byte as u32, pos as u32);

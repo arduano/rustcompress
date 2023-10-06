@@ -5,7 +5,7 @@ use self::match_finding::{Match, MatchFinder};
 use super::{data_buffers::EncoderDataBuffer, LZMACodec};
 
 mod instructions_fast;
-mod match_finding;
+pub mod match_finding;
 
 pub enum EncodeInstruction {
     Literal,
@@ -14,6 +14,9 @@ pub enum EncodeInstruction {
 }
 
 pub trait LZMAInstructionPicker {
+    /// Returns the next symbol to encode, optionally progressing the data buffer forwards.
+    ///
+    /// The data buffer can't be progressed more than the returned instruction's length.
     fn get_next_symbol(
         &mut self,
         data: &mut LZMAEncoderInput<impl MatchFinder>,
@@ -44,6 +47,10 @@ impl<M: MatchFinder> LZMAEncoderInput<M> {
 
             dict_size,
         }
+    }
+
+    pub fn pos(&self) -> u64 {
+        self.buffer.pos()
     }
 
     /// The number of free bytes that could safely be appended without overwriting the dictionary

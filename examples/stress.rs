@@ -1,12 +1,10 @@
 use std::io::{Cursor, Write};
 
 use lzma_rust::LZMA2Options;
-use rustcompress::compressors::lzma::{
-    codecs::{
-        header_codec::parse_lzma_header, lzma_stream_codec::LZMACodecDecoder,
-        range_codec::RangeDecoder,
-    },
-    data_buffers::DecoderDataBuffer,
+use rustcompress::compressors::lzma::codecs::{
+    header_codec::parse_lzma_header,
+    lzma_stream_codec::{data_buffers::DecoderDataBuffer, LZMACodecDecoder},
+    range_codec::RangeDecoder,
 };
 
 fn main() {
