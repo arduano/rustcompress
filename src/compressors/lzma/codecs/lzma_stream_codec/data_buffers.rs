@@ -4,12 +4,9 @@ use self::cyclic_buffer::CyclicBuffer;
 
 mod cyclic_buffer;
 
-// TODO: Port EncoderDataBuffer to use CyclicBuffer
-
 pub struct EncoderDataBuffer {
     compress_pos: u64,
     max_forwards_bytes: u32,
-    dict_size: u32,
     buf: CyclicBuffer<u8>,
 }
 
@@ -22,7 +19,6 @@ impl EncoderDataBuffer {
             buf: CyclicBuffer::new((dict_size + max_forwards_bytes) as usize),
             compress_pos: 0 as u64,
             max_forwards_bytes,
-            dict_size,
         }
     }
 

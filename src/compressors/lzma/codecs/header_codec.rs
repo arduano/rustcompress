@@ -2,7 +2,8 @@ use std::io::{self, Read};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use crate::compressors::lzma::{DICT_SIZE_MAX, DICT_SIZE_MIN};
+pub const DICT_SIZE_MIN: u32 = 4096;
+pub const DICT_SIZE_MAX: u32 = u32::MAX & !(15 as u32);
 
 #[derive(Debug, Clone)]
 pub struct LzmaHeaderProps {

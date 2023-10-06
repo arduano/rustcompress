@@ -19,6 +19,7 @@ use super::{
     range_codec::{RangeDecoder, RangeEncProbability, RangeEncoder},
 };
 
+// TODO: Clean up all these constants
 const POS_STATES_MAX: usize = 1 << 4;
 const MATCH_LEN_MIN: usize = 2;
 
@@ -88,11 +89,10 @@ pub struct LZMACodec {
     is_rep2_probs: [RangeEncProbability; state::STATES],
     is_rep0_long_probs: [[RangeEncProbability; POS_STATES_MAX]; state::STATES],
 
-    // TODO: Check these constants
     dist_slot_probs: [LengthValueCodec<DIST_SLOTS>; DIST_STATES],
     // I'm not sure if doing this the static way or the array way is faster
     // But I didn't know that this would be necessary when I initially implemented the const generic
-    // TODO: Test the performance of this. Theoretically, static should be faster as it can do loop unrolling.
+    // TODO: Test the performance of this, as opposed to array indexing and passing around probability array slices.
     dist_special_probs: (
         LengthValueCodec<2>,
         LengthValueCodec<2>,

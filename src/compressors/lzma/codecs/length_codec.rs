@@ -42,9 +42,8 @@ impl<const BITS_EXP: usize> LengthValueCodec<BITS_EXP> {
             let bit = symbol & mask;
             enc.encode_bit(&mut self.probs[index], bit)?;
             index <<= 1;
-            if bit != 0 {
-                index = index | 1; // TODO: Remove branching here?
-            }
+            index |= (bit != 0) as usize;
+
             if mask == 1 {
                 // When the 1 bit reached the end, we're done
                 break;

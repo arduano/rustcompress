@@ -15,7 +15,7 @@ impl MatchReadPos {
     pub fn increment(&mut self) -> PosIncrementResult {
         self.0 += 1;
 
-        if self.0 == 0 {
+        if *self == Self::MAX_SAFE_READ_POS {
             PosIncrementResult::ShouldNormalize
         } else {
             PosIncrementResult::Ok
