@@ -9,7 +9,8 @@ use rustcompress::compressors::lzma::codecs::{
     lzma_stream_codec::{
         data_buffers::DecoderDataBuffer,
         encoders::{
-            instructions_fast::LZMAFastInstructionPicker, match_finding::hc4::HC4MatchFinder,
+            instructions_fast::LZMAFastInstructionPicker,
+            instructions_normal::LZMANormalInstructionPicker, match_finding::hc4::HC4MatchFinder,
             LZMAEncoderInput,
         },
         LZMACodecDecoder, LZMACodecEncoder,
@@ -34,8 +35,9 @@ fn main() {
 
     let mut rc = RangeEncoder::new(&mut compressed);
     let nice_len = 270;
-    let picker = LZMAFastInstructionPicker::new(nice_len);
+    let picker = LZMANormalInstructionPicker::new(nice_len, header.props.pb as u32);
     let mut encoder = LZMACodecEncoder::new(
+        header.dict_size,
         header.props.lc as u32,
         header.props.lp as u32,
         header.props.pb as u32,
@@ -63,14 +65,11 @@ fn main() {
             written += to_write;
         }
 
-        let forward_before = encoder_buffer.forward_bytes();
-
-        encoder
+        let encoded_bytes = encoder
             .encode_one_packet(&mut rc, &mut encoder_buffer)
             .unwrap();
 
-        let forward_after = encoder_buffer.forward_bytes();
-        let offset = forward_before - forward_after;
+        let offset = encoded_bytes as usize;
         dbg!(String::from_utf8_lossy(&data[passed..passed + offset]));
         passed += offset;
 

@@ -43,6 +43,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let nice_len = 270;
             let picker = LZMAFastInstructionPicker::new(nice_len);
             let mut encoder = LZMACodecEncoder::new(
+                header.dict_size,
                 header.props.lc as u32,
                 header.props.lp as u32,
                 header.props.pb as u32,

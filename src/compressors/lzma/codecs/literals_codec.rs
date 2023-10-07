@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 
 use self::subcoder::LiteralSubcoder;
 
-use super::range_codec::{RangeDecoder, RangeEncoder};
+use super::range_codec::{RangeDecoder, RangeEncPrice, RangeEncoder};
 
 /// A struct that helps choose the probability set to use for encoding/decoding
 /// the next literal based on the previous uncompressed byte. lp and lc are
@@ -52,9 +52,14 @@ impl LiteralCodec {
         }
     }
 
-    fn get_subcoder(&mut self, prev_byte: u32, pos: u32) -> &mut LiteralSubcoder {
+    fn get_subcoder_mut(&mut self, prev_byte: u32, pos: u32) -> &mut LiteralSubcoder {
         let i = self.coder.get_sub_coder_index(prev_byte, pos);
         &mut self.sub_decoders[i as usize]
+    }
+
+    fn get_subcoder(&self, prev_byte: u32, pos: u32) -> &LiteralSubcoder {
+        let i = self.coder.get_sub_coder_index(prev_byte, pos);
+        &self.sub_decoders[i as usize]
     }
 }
 
@@ -75,7 +80,7 @@ impl LiteralCodecDecoder {
         prev_byte: u8,
         pos: usize,
     ) -> io::Result<u8> {
-        let subcoder = self.codec.get_subcoder(prev_byte as u32, pos as u32);
+        let subcoder = self.codec.get_subcoder_mut(prev_byte as u32, pos as u32);
         subcoder.decode_normal_literal(rc)
     }
 
@@ -86,7 +91,7 @@ impl LiteralCodecDecoder {
         pos: usize,
         prev_match_byte: u8,
     ) -> io::Result<u8> {
-        let subcoder = self.codec.get_subcoder(prev_byte as u32, pos as u32);
+        let subcoder = self.codec.get_subcoder_mut(prev_byte as u32, pos as u32);
         subcoder.decode_matched_literal(rc, prev_match_byte)
     }
 }
@@ -109,7 +114,7 @@ impl LiteralCodecEncoder {
         prev_byte: u8,
         pos: u32,
     ) -> io::Result<()> {
-        let subcoder = self.codec.get_subcoder(prev_byte as u32, pos as u32);
+        let subcoder = self.codec.get_subcoder_mut(prev_byte as u32, pos as u32);
         subcoder.encode_normal_literal(rc, symbol)
     }
 
@@ -121,7 +126,29 @@ impl LiteralCodecEncoder {
         pos: u32,
         match_byte: u8,
     ) -> io::Result<()> {
-        let subcoder = self.codec.get_subcoder(prev_byte as u32, pos as u32);
+        let subcoder = self.codec.get_subcoder_mut(prev_byte as u32, pos as u32);
         subcoder.encode_matched_literal(rc, symbol, match_byte)
+    }
+
+    pub fn get_normal_price(
+        &self,
+        cur_byte: u8,
+        match_byte: u8,
+        prev_byte: u8,
+        pos: u32,
+    ) -> RangeEncPrice {
+        let subcoder = self.codec.get_subcoder(prev_byte as u32, pos as u32);
+        subcoder.get_normal_price(cur_byte)
+    }
+
+    pub fn get_matched_price(
+        &self,
+        cur_byte: u8,
+        match_byte: u8,
+        prev_byte: u8,
+        pos: u32,
+    ) -> RangeEncPrice {
+        let subcoder = self.codec.get_subcoder(prev_byte as u32, pos as u32);
+        subcoder.get_matched_price(cur_byte, match_byte)
     }
 }

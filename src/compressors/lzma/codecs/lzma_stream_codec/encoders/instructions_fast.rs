@@ -1,6 +1,6 @@
 use crate::compressors::lzma::codecs::{
     length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
-    lzma_stream_codec::LZMACodec,
+    lzma_stream_codec::{EncoderPriceCalc, LZMACodec},
 };
 
 use super::{
@@ -29,6 +29,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
     fn get_next_symbol(
         &mut self,
         input: &mut LZMAEncoderInput<impl MatchFinder>,
+        _price_calc: &mut EncoderPriceCalc,
         state: &LZMACodec,
     ) -> EncodeInstruction {
         let avail = input.buffer().forwards_bytes().min(MATCH_LEN_MAX);

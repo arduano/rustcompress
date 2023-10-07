@@ -16,7 +16,7 @@ use self::{
 use super::{
     length_codec::{LengthCodecDecoder, LengthCodecEncoder, LengthValueCodec},
     literals_codec::{LiteralCodecDecoder, LiteralCodecEncoder},
-    range_codec::{RangeDecoder, RangeEncProbability, RangeEncoder},
+    range_codec::{RangeDecoder, RangeEncPrice, RangeEncProbability, RangeEncoder},
 };
 
 // TODO: Clean up all these constants
@@ -27,16 +27,20 @@ const DIST_STATES: usize = 4;
 const DIST_SLOTS: usize = 1 << 6;
 const DIST_MODEL_START: u32 = 4;
 const DIST_MODEL_END: u32 = 14;
+const FULL_DISTANCES: usize = 1 << (DIST_MODEL_END / 2);
 
 const ALIGN_BITS: usize = 4;
 const ALIGN_SIZE: usize = 1 << ALIGN_BITS;
 const ALIGN_MASK: usize = ALIGN_SIZE - 1;
 
+const DIST_PRICE_UPDATE_INTERVAL: u32 = FULL_DISTANCES as u32;
+const ALIGN_PRICE_UPDATE_INTERVAL: u32 = ALIGN_SIZE as u32;
+
 const REPS: usize = 4;
 
-fn coder_get_dict_size(len: usize) -> usize {
-    if len < DIST_STATES + MATCH_LEN_MIN {
-        len - MATCH_LEN_MIN
+fn get_dist_state(len: u32) -> usize {
+    if len < DIST_STATES as u32 + MATCH_LEN_MIN as u32 {
+        len as usize - MATCH_LEN_MIN
     } else {
         DIST_STATES - 1
     }
@@ -153,15 +157,14 @@ pub struct LZMACodecEncoder<Mode: LZMAInstructionPicker> {
     match_len_encoder: LengthCodecEncoder,
     rep_len_encoder: LengthCodecEncoder,
 
-    dist_price_count: i32,
-    align_price_count: i32,
+    data: LZMAEncoderData,
 
     picker: Mode,
 }
 
 impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
     // TODO: Simplify these args by using structs
-    pub fn new(lc: u32, lp: u32, pb: u32, nice_len: u32, picker: Mode) -> Self {
+    pub fn new(dict_size: u32, lc: u32, lp: u32, pb: u32, nice_len: u32, picker: Mode) -> Self {
         Self {
             codec: LZMACodec::new(pb),
 
@@ -169,8 +172,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
             match_len_encoder: LengthCodecEncoder::new(pb, nice_len),
             rep_len_encoder: LengthCodecEncoder::new(pb, nice_len),
 
-            dist_price_count: 0,
-            align_price_count: 0,
+            data: LZMAEncoderData::new(dict_size),
 
             picker,
         }
@@ -183,14 +185,24 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
     ) -> EncodeInstruction {
         let pos = input.pos();
 
-        let instruction = self.picker.get_next_symbol(input, &self.codec);
+        let mut price_calc = EncoderPriceCalc {
+            data: &mut self.data,
+            codec: &self.codec,
+            literal_encoder: &mut self.literal_encoder,
+            match_len_encoder: &mut self.match_len_encoder,
+            rep_len_encoder: &mut self.rep_len_encoder,
+        };
+
+        let instruction = self
+            .picker
+            .get_next_symbol(input, &mut price_calc, &self.codec);
 
         let bytes_to_encode = instruction.length();
 
         let new_pos = pos + bytes_to_encode as u64;
         if input.pos() > new_pos {
             // The instruction picker mismanaged the buffer position
-            panic!("input.pos(): {}, new_pos: {}", input.pos(), new_pos);
+            // panic!("input.pos(): {}, new_pos: {}", input.pos(), new_pos);
         } else if input.pos() < new_pos {
             // Progress the buffer ourselves
             input.skip((new_pos - input.pos()) as u32);
@@ -203,7 +215,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
         &mut self,
         rc: &mut RangeEncoder<impl Write>,
         input: &mut LZMAEncoderInput<impl MatchFinder>,
-    ) -> io::Result<()> {
+    ) -> io::Result<u32> {
         let pos = input.pos() - input.dict_size() as u64;
 
         let pos_state = pos as u32 & self.codec.pos_mask;
@@ -237,7 +249,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
             }
         }
 
-        Ok(())
+        Ok(instruction.length())
     }
 
     fn encode_literal(
@@ -278,8 +290,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
         self.match_len_encoder.encode(rc, match_.len, pos_state)?;
         let dist_slot = get_dist_slot(match_.distance);
 
-        let slot_encoder =
-            &mut self.codec.dist_slot_probs[coder_get_dict_size(match_.len as usize)];
+        let slot_encoder = &mut self.codec.dist_slot_probs[get_dist_state(match_.len)];
         slot_encoder.encode_bit_tree(rc, dist_slot)?;
 
         if dist_slot >= DIST_MODEL_START {
@@ -296,7 +307,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
                     .dist_align_probs
                     .encode_reverse_bit_tree(rc, dist_reduced & ALIGN_MASK as u32)?;
 
-                self.align_price_count = self.align_price_count - 1;
+                self.data.align_price_count -= 1;
             }
         }
 
@@ -305,7 +316,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
         self.codec.reps[1] = self.codec.reps[0];
         self.codec.reps[0] = match_.distance;
 
-        self.dist_price_count = self.dist_price_count - 1;
+        self.data.dist_price_count -= 1;
 
         Ok(())
     }
@@ -380,6 +391,272 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
             self.codec.state.update_long_rep();
         }
         Ok(())
+    }
+}
+
+struct LZMAEncoderData {
+    dist_price_count: i32,
+    align_price_count: i32,
+    dist_slot_prices_size: u32,
+    dist_slot_prices: Vec<Vec<RangeEncPrice>>, // TODO: Flatten this array
+    full_dist_prices: [[RangeEncPrice; FULL_DISTANCES]; DIST_STATES],
+    align_prices: [RangeEncPrice; ALIGN_SIZE],
+}
+
+impl LZMAEncoderData {
+    pub fn new(dict_size: u32) -> Self {
+        let dist_slot_prices_size = get_dist_slot(dict_size - 1) + 1;
+        let dist_slot_prices =
+            vec![vec![RangeEncPrice::zero(); dist_slot_prices_size as usize]; DIST_STATES];
+
+        Self {
+            dist_price_count: 0,
+            align_price_count: 0,
+            dist_slot_prices_size,
+            dist_slot_prices,
+            full_dist_prices: [[RangeEncPrice::zero(); FULL_DISTANCES]; DIST_STATES],
+            align_prices: [RangeEncPrice::zero(); ALIGN_SIZE],
+        }
+    }
+}
+
+pub struct EncoderPriceCalc<'a> {
+    data: &'a mut LZMAEncoderData,
+    codec: &'a LZMACodec,
+    literal_encoder: &'a mut LiteralCodecEncoder,
+    match_len_encoder: &'a mut LengthCodecEncoder,
+    rep_len_encoder: &'a mut LengthCodecEncoder,
+}
+
+impl<'a> EncoderPriceCalc<'a> {
+    pub fn update_prices(&mut self) {
+        if self.data.dist_price_count <= 0 {
+            self.update_dist_prices();
+        }
+
+        if self.data.align_price_count <= 0 {
+            self.update_align_prices();
+        }
+        self.match_len_encoder.update_prices();
+        self.rep_len_encoder.update_prices();
+    }
+
+    pub fn update_dist_prices(&mut self) {
+        self.data.dist_price_count = DIST_PRICE_UPDATE_INTERVAL as _;
+
+        for dist_state in 0..DIST_STATES {
+            for dist_slot in 0..self.data.dist_slot_prices_size as usize {
+                self.data.dist_slot_prices[dist_state][dist_slot] =
+                    self.codec.dist_slot_probs[dist_state].get_bit_tree_price(dist_slot as u32);
+            }
+
+            for dist_slot in DIST_MODEL_END as u32..self.data.dist_slot_prices_size {
+                let count = (dist_slot >> 1) - 1 - ALIGN_BITS as u32;
+                self.data.dist_slot_prices[dist_state][dist_slot as usize] +=
+                    RangeEncPrice::get_direct_bits_price(count);
+            }
+
+            for dist in 0..DIST_MODEL_START {
+                self.data.full_dist_prices[dist_state][dist as usize] =
+                    self.data.dist_slot_prices[dist_state][dist as usize];
+            }
+        }
+
+        let mut dist = DIST_MODEL_START;
+        for dist_slot in DIST_MODEL_START..DIST_MODEL_END {
+            let footer_bits = (dist_slot >> 1) - 1;
+            let base = (2 | (dist_slot & 1)) << footer_bits;
+
+            let index = dist_slot - DIST_MODEL_START;
+            let limit = match index {
+                // TODO: Clean this
+                0 => 2,
+                1 => 2,
+                2 => 4,
+                3 => 4,
+                4 => 8,
+                5 => 8,
+                6 => 16,
+                7 => 16,
+                8 => 32,
+                9 => 32,
+                _ => unreachable!(),
+            };
+            for _i in 0..limit {
+                let dist_reduced = dist - base;
+
+                // let price = RangeEncoder::get_reverse_bit_tree_price(
+                //     self.get_dist_special(dist_slot - DIST_MODEL_START),
+                //     dist_reduced as u32,
+                // );
+
+                let probs = &self.codec.dist_special_probs;
+                let price = match index {
+                    0 => probs.0.get_reverse_bit_tree_price(dist_reduced),
+                    1 => probs.1.get_reverse_bit_tree_price(dist_reduced),
+                    2 => probs.2.get_reverse_bit_tree_price(dist_reduced),
+                    3 => probs.3.get_reverse_bit_tree_price(dist_reduced),
+                    4 => probs.4.get_reverse_bit_tree_price(dist_reduced),
+                    5 => probs.5.get_reverse_bit_tree_price(dist_reduced),
+                    6 => probs.6.get_reverse_bit_tree_price(dist_reduced),
+                    7 => probs.7.get_reverse_bit_tree_price(dist_reduced),
+                    8 => probs.8.get_reverse_bit_tree_price(dist_reduced),
+                    9 => probs.9.get_reverse_bit_tree_price(dist_reduced),
+                    _ => unreachable!(),
+                };
+
+                for dist_state in 0..DIST_STATES {
+                    self.data.full_dist_prices[dist_state][dist as usize] =
+                        self.data.dist_slot_prices[dist_state][dist_slot as usize] + price;
+                }
+                dist += 1;
+            }
+        }
+
+        assert!(dist == FULL_DISTANCES as u32);
+    }
+
+    fn update_align_prices(&mut self) {
+        self.data.align_price_count = ALIGN_PRICE_UPDATE_INTERVAL as i32;
+
+        for i in 0..ALIGN_SIZE {
+            self.data.align_prices[i] = self
+                .codec
+                .dist_align_probs
+                .get_reverse_bit_tree_price(i as u32);
+        }
+    }
+
+    pub fn get_literal_price(
+        &self,
+        cur_byte: u8,
+        match_byte: u8,
+        prev_byte: u8,
+        pos: u32,
+        state: &State,
+    ) -> RangeEncPrice {
+        let pos_state = pos & self.codec.pos_mask;
+        let prob = &self.codec.is_match_probs[state.get() as usize][pos_state as usize];
+        let packet_price = prob.get_bit_price(0);
+
+        let value_price = if state.is_literal() {
+            self.literal_encoder
+                .get_normal_price(cur_byte, match_byte, prev_byte, pos)
+        } else {
+            self.literal_encoder
+                .get_matched_price(cur_byte, match_byte, prev_byte, pos)
+        };
+
+        packet_price + value_price
+    }
+
+    pub fn get_rep_len_price(&self, len: u32, pos_state: u32) -> RangeEncPrice {
+        self.rep_len_encoder
+            .get_price(len as usize, pos_state as usize)
+    }
+
+    // TODO: Rename this function to "get_match_packet_price" and any relevant variables that use it
+    pub fn get_any_match_price(&self, state: &State, pos_state: u32) -> RangeEncPrice {
+        let prob = &self.codec.is_match_probs[state.get() as usize][pos_state as usize];
+        prob.get_bit_price(1)
+    }
+
+    pub fn get_normal_match_price(
+        &self,
+        any_match_price: RangeEncPrice,
+        state: &State,
+    ) -> RangeEncPrice {
+        let is_rep_price = &self.codec.is_rep_probs[state.get() as usize];
+        any_match_price + is_rep_price.get_bit_price(0)
+    }
+
+    pub fn get_any_rep_price(
+        &self,
+        any_match_price: RangeEncPrice,
+        state: &State,
+    ) -> RangeEncPrice {
+        let is_rep_price = &self.codec.is_rep_probs[state.get() as usize];
+        any_match_price + is_rep_price.get_bit_price(1)
+    }
+
+    pub fn get_short_rep_price(
+        &self,
+        any_rep_price: RangeEncPrice,
+        state: &State,
+        pos_state: u32,
+    ) -> RangeEncPrice {
+        let is_rep0_price = &self.codec.is_rep0_probs[state.get() as usize];
+        let is_rep0_long_price =
+            &self.codec.is_rep0_long_probs[state.get() as usize][pos_state as usize];
+
+        any_rep_price + is_rep0_price.get_bit_price(0) + is_rep0_long_price.get_bit_price(0)
+    }
+
+    pub fn get_long_rep_price(
+        &self,
+        any_rep_price: RangeEncPrice,
+        rep: u32,
+        state: &State,
+        pos_state: u32,
+    ) -> RangeEncPrice {
+        let is_rep0_price = &self.codec.is_rep0_probs[state.get() as usize];
+        let is_rep0_long_price =
+            &self.codec.is_rep0_long_probs[state.get() as usize][pos_state as usize];
+        let is_rep1_price = &self.codec.is_rep1_probs[state.get() as usize];
+
+        let mut price = any_rep_price;
+
+        if rep == 0 {
+            price += is_rep0_price.get_bit_price(0) + is_rep0_long_price.get_bit_price(1);
+        } else {
+            price += is_rep0_price.get_bit_price(1);
+
+            if rep == 1 {
+                price += is_rep1_price.get_bit_price(0);
+            } else {
+                let is_rep2_price = &self.codec.is_rep2_probs[state.get() as usize];
+                price += is_rep1_price.get_bit_price(1) + is_rep2_price.get_bit_price(rep - 2);
+            }
+        }
+
+        price
+    }
+
+    pub fn get_long_rep_and_len_price(
+        &self,
+        rep: u32,
+        len: u32,
+        state: &State,
+        pos_state: u32,
+    ) -> RangeEncPrice {
+        let any_match_price = self.get_any_match_price(state, pos_state);
+        let any_rep_price = self.get_any_rep_price(any_match_price, state);
+        let long_rep_price = self.get_long_rep_price(any_rep_price, rep, state, pos_state);
+        return long_rep_price + self.rep_len_encoder.get_price(len as _, pos_state as _);
+    }
+
+    pub fn get_match_and_len_price(
+        &self,
+        normal_match_price: RangeEncPrice,
+        dist: u32,
+        len: u32,
+        pos_state: u32,
+    ) -> RangeEncPrice {
+        let mut price =
+            normal_match_price + self.match_len_encoder.get_price(len as _, pos_state as _);
+        let dist_state = get_dist_state(len);
+
+        if dist < FULL_DISTANCES as u32 {
+            price += self.data.full_dist_prices[dist_state as usize][dist as usize];
+        } else {
+            // Note that distSlotPrices includes also
+            // the price of direct bits.
+            let dist_slot = get_dist_slot(dist);
+            price += self.data.dist_slot_prices[dist_state as usize][dist_slot as usize]
+                + self.data.align_prices[(dist & ALIGN_MASK as u32) as usize];
+        }
+
+        return price;
     }
 }
 
@@ -472,7 +749,7 @@ impl LZMACodecDecoder {
         self.codec.reps[1] = self.codec.reps[0];
 
         let len = self.match_len_decoder.decode(rc, pos_state)?;
-        let slot_decoder = &mut self.codec.dist_slot_probs[coder_get_dict_size(len as usize)];
+        let slot_decoder = &mut self.codec.dist_slot_probs[get_dist_state(len)];
         let dist_slot = slot_decoder.decode_bit_tree(rc)?;
 
         if dist_slot < DIST_MODEL_START {

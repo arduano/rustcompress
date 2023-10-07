@@ -76,7 +76,7 @@ impl EncoderDataBuffer {
     }
 
     /// Index of the offset for the underlying cyclical buffer
-    pub fn get_byte_index(&self, offset: i32) -> usize {
+    fn get_byte_index(&self, offset: i32) -> usize {
         (self.forwards_bytes() as i32 - offset - 1) as usize
     }
 
@@ -321,6 +321,10 @@ impl DecoderDataBuffer {
 mod tests {
     use super::*;
 
+    // Using a typed constant like this because rust's type inference somehow shits itself
+    // when there's other type errors anywhere else in the project, causing an error in this file for no reason.
+    const EMPTY: &[i32] = &[];
+
     #[test]
     fn test_align_slices() {
         let left = (&[1, 2, 3][..], &[4, 5, 6, 7][..]);
@@ -362,7 +366,7 @@ mod tests {
 
         assert_eq!(left[0], &[1, 2, 3][..]);
         assert_eq!(left[1], &[4][..]);
-        assert_eq!(left[2], &[][..]);
+        assert_eq!(left[2], EMPTY);
 
         assert_eq!(right[0], &[8, 9, 10][..]);
         assert_eq!(right[1], &[11][..]);
@@ -371,16 +375,16 @@ mod tests {
 
     #[test]
     fn test_align_slices_left_empty() {
-        let left = (&[][..], &[][..]);
+        let left = (EMPTY, EMPTY);
         let right = (&[1, 2][..], &[3, 4][..]);
 
         let (left, right) = align_slices(right, left);
 
-        assert_eq!(left[0], &[][..]);
-        assert_eq!(left[1], &[][..]);
-        assert_eq!(left[2], &[][..]);
+        assert_eq!(left[0], EMPTY);
+        assert_eq!(left[1], EMPTY);
+        assert_eq!(left[2], EMPTY);
 
-        assert_eq!(right[0], &[][..]);
+        assert_eq!(right[0], EMPTY);
         assert_eq!(right[1], &[1, 2][..]);
         assert_eq!(right[2], &[3, 4][..]);
     }

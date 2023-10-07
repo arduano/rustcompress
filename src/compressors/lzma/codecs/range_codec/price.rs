@@ -5,6 +5,8 @@ use super::{RangeEncProbability, BIT_MODEL_TOTAL};
 const MOVE_REDUCING_BITS: usize = 4;
 const BIT_PRICE_SHIFT_BITS: usize = 4;
 
+const INFINITY_PRICE: u32 = 1 << 30;
+
 const PRICES: &[u32] = &[
     0x80, 0x67, 0x5b, 0x54, 0x4e, 0x49, 0x45, 0x42, 0x3f, 0x3d, 0x3a, 0x38, 0x36, 0x34, 0x33, 0x31,
     0x30, 0x2e, 0x2d, 0x2c, 0x2b, 0x2a, 0x29, 0x28, 0x27, 0x26, 0x25, 0x24, 0x23, 0x22, 0x22, 0x21,
@@ -25,13 +27,19 @@ impl RangeEncPrice {
         RangeEncPrice(0)
     }
 
-    const DIRECT_BIT_PRICE: RangeEncPrice = RangeEncPrice(1 << BIT_PRICE_SHIFT_BITS);
+    pub fn infinity() -> RangeEncPrice {
+        RangeEncPrice(INFINITY_PRICE)
+    }
 
     pub fn get_bit_price(prob: RangeEncProbability, bit: u32) -> RangeEncPrice {
         let bit = bit as i32;
         debug_assert!(bit == 0 || bit == 1);
         let i = ((prob.0 as u32) ^ ((-bit) as u32 & (BIT_MODEL_TOTAL - 1))) >> MOVE_REDUCING_BITS;
         RangeEncPrice(PRICES[i as usize])
+    }
+
+    pub fn get_direct_bits_price(count: u32) -> RangeEncPrice {
+        RangeEncPrice(count << BIT_PRICE_SHIFT_BITS)
     }
 }
 

@@ -1,4 +1,4 @@
-use super::super::length_codec::MATCH_LEN_MAX;
+use super::{super::length_codec::MATCH_LEN_MAX, EncoderPriceCalc};
 
 use self::match_finding::{Match, MatchFinder};
 
@@ -32,6 +32,7 @@ pub trait LZMAInstructionPicker {
     fn get_next_symbol(
         &mut self,
         data: &mut LZMAEncoderInput<impl MatchFinder>,
+        price_calc: &mut EncoderPriceCalc,
         state: &LZMACodec,
     ) -> EncodeInstruction;
 }

@@ -122,7 +122,7 @@ impl LiteralSubcoder {
         price
     }
 
-    pub fn get_matched_price(&self, symbol: u32, match_byte: u8) -> RangeEncPrice {
+    pub fn get_matched_price(&self, symbol: u8, match_byte: u8) -> RangeEncPrice {
         let mut price = RangeEncPrice::zero();
 
         // Add an extra 1 bit to the symbol on the 9th bit

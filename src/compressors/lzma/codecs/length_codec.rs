@@ -287,7 +287,7 @@ impl LengthCodecEncoder {
     /// Update the prices of all pos_states that have counted down to 0.
     /// We count every time we encode a length for that pos_state,
     /// and when we reach 0 we update the prices.
-    fn update_prices(&mut self) {
+    pub fn update_prices(&mut self) {
         for pos_state in 0..self.codec.pos_states.len() {
             if self.pos_state_prices[pos_state].counter <= 0 {
                 self.pos_state_prices[pos_state].counter = PRICE_UPDATE_INTERVAL as _;
