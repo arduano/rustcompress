@@ -5,6 +5,7 @@ use self::match_finding::{Match, MatchFinder};
 use super::{data_buffers::EncoderDataBuffer, LZMACodec};
 
 pub mod instructions_fast;
+pub mod instructions_normal;
 pub mod match_finding;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

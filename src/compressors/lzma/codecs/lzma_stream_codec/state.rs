@@ -23,16 +23,8 @@ impl State {
         Self { state: 0 }
     }
 
-    pub fn reset(&mut self) {
-        self.state = LIT_LIT;
-    }
-
     pub fn get(&self) -> u8 {
         self.state
-    }
-
-    pub fn set(&mut self, other: State) {
-        self.state = other.state;
     }
 
     pub fn update_literal(&mut self) {
