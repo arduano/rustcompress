@@ -1,12 +1,12 @@
-use super::{super::length_codec::MATCH_LEN_MAX, EncoderPriceCalc};
+use super::{super::length_codec::MATCH_LEN_MAX, EncoderPriceCalc, state::State};
 
 use self::match_finding::{Match, MatchFinder};
 
 use super::{data_buffers::EncoderDataBuffer, LZMACodec};
 
 pub mod instructions_fast;
-pub mod instructions_normal;
-pub mod instructions_normal2;
+// pub mod instructions_normal;
+// pub mod instructions_normal2;
 pub mod match_finding;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,7 +34,7 @@ pub trait LZMAInstructionPicker {
         &mut self,
         data: &mut LZMAEncoderInput<impl MatchFinder>,
         price_calc: &mut EncoderPriceCalc,
-        state: &LZMACodec,
+        state: &State,
     ) -> EncodeInstruction;
 }
 

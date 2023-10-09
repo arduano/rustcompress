@@ -36,8 +36,6 @@ const ALIGN_MASK: usize = ALIGN_SIZE - 1;
 const DIST_PRICE_UPDATE_INTERVAL: u32 = FULL_DISTANCES as u32;
 const ALIGN_PRICE_UPDATE_INTERVAL: u32 = ALIGN_SIZE as u32;
 
-const REPS: usize = 4;
-
 fn get_dist_state(len: u32) -> usize {
     if len < DIST_STATES as u32 + MATCH_LEN_MIN as u32 {
         len as usize - MATCH_LEN_MIN
@@ -84,8 +82,6 @@ pub struct LZMACodec {
     pos_mask: u32,
     state: State,
 
-    reps: [u32; REPS],
-
     is_match_probs: [[RangeEncProbability; POS_STATES_MAX]; state::STATES],
     is_rep_probs: [RangeEncProbability; state::STATES],
     is_rep0_probs: [RangeEncProbability; state::STATES],
@@ -119,8 +115,6 @@ impl LZMACodec {
 
             state: State::new(),
 
-            reps: [0; REPS],
-
             is_match_probs: [[RangeEncProbability::new(); POS_STATES_MAX]; state::STATES],
             is_rep_probs: [RangeEncProbability::new(); state::STATES],
             is_rep0_probs: [RangeEncProbability::new(); state::STATES],
@@ -143,10 +137,6 @@ impl LZMACodec {
             ),
             dist_align_probs: LengthValueCodec::new(),
         }
-    }
-
-    pub fn reps(&self) -> &[u32; REPS] {
-        &self.reps
     }
 }
 
@@ -201,7 +191,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
 
         let instruction = self
             .picker
-            .get_next_symbol(input, &mut price_calc, &self.codec);
+            .get_next_symbol(input, &mut price_calc, &self.codec.state);
 
         dbg!(instruction);
 
@@ -225,7 +215,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
         let pos = input.pos() - input.dict_size() as u64;
 
         let pos_state = pos as u32 & self.codec.pos_mask;
-        let state_idx = self.codec.state.get() as usize;
+        let state_idx = self.codec.state.get_idx() as usize;
 
         let instruction = self.get_next_instruction(input);
 
@@ -278,9 +268,8 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
             self.literal_encoder
                 .encode_normal(rc, symbol, prev_byte, pos)?
         } else {
-            let match_byte = input
-                .buffer()
-                .get_byte(-(self.codec.reps[0] as i32) - 1 - length);
+            let rep0 = self.codec.state.get_rep(0) as i32;
+            let match_byte = input.buffer().get_byte(-rep0 - 1 - length);
             self.literal_encoder
                 .encode_matched(rc, symbol, prev_byte, pos, match_byte)?
         }
@@ -296,7 +285,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
         match_: Match,
         pos_state: u32,
     ) -> io::Result<()> {
-        self.codec.state.update_match();
+        self.codec.state.update_match(match_.distance);
         self.match_len_encoder.encode(rc, match_.len, pos_state)?;
         let dist_slot = get_dist_slot(match_.distance);
 
@@ -320,11 +309,6 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
                 self.data.align_price_count -= 1;
             }
         }
-
-        self.codec.reps[3] = self.codec.reps[2];
-        self.codec.reps[2] = self.codec.reps[1];
-        self.codec.reps[1] = self.codec.reps[0];
-        self.codec.reps[0] = match_.distance;
 
         self.data.dist_price_count -= 1;
 
@@ -360,45 +344,42 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
         len: u32,
         pos_state: u32,
     ) -> std::io::Result<()> {
-        let state = self.codec.state.get() as usize;
+        let state = self.codec.state.get_idx() as usize;
 
-        // Store the value as we're swapping array elements around
-        let rep_value = self.codec.reps[rep as usize];
+        if len == 1 {
+            debug_assert!(rep == 0);
 
-        if rep == 0 {
             let rep0_prob = &mut self.codec.is_rep0_probs[state];
             rc.encode_bit(rep0_prob, 0)?;
 
             let rep0_long_prob = &mut self.codec.is_rep0_long_probs[state][pos_state as usize];
-            rc.encode_bit(rep0_long_prob, if len == 1 { 0 } else { 1 })?;
-        } else {
-            let rep0_prob = &mut self.codec.is_rep0_probs[state];
-            rc.encode_bit(rep0_prob, 1)?;
+            rc.encode_bit(rep0_long_prob, 0)?;
 
-            if rep == 1 {
-                let rep1_prob = &mut self.codec.is_rep1_probs[state];
-                rc.encode_bit(rep1_prob, 0)?;
-            } else {
-                let rep1_prob = &mut self.codec.is_rep1_probs[state];
-                rc.encode_bit(rep1_prob, 1)?;
-                let rep2_prob = &mut self.codec.is_rep2_probs[state];
-                rc.encode_bit(rep2_prob, rep - 2)?;
-
-                if rep == 3 {
-                    self.codec.reps[3] = self.codec.reps[2];
-                }
-                self.codec.reps[2] = self.codec.reps[1];
-            }
-
-            self.codec.reps[1] = self.codec.reps[0];
-            self.codec.reps[0] = rep_value;
-        }
-
-        if len == 1 {
             self.codec.state.update_short_rep();
         } else {
+            if rep == 0 {
+                let rep0_prob = &mut self.codec.is_rep0_probs[state];
+                rc.encode_bit(rep0_prob, 0)?;
+
+                let rep0_long_prob = &mut self.codec.is_rep0_long_probs[state][pos_state as usize];
+                rc.encode_bit(rep0_long_prob, 1)?;
+            } else {
+                let rep0_prob = &mut self.codec.is_rep0_probs[state];
+                rc.encode_bit(rep0_prob, 1)?;
+
+                if rep == 1 {
+                    let rep1_prob = &mut self.codec.is_rep1_probs[state];
+                    rc.encode_bit(rep1_prob, 0)?;
+                } else {
+                    let rep1_prob = &mut self.codec.is_rep1_probs[state];
+                    rc.encode_bit(rep1_prob, 1)?;
+                    let rep2_prob = &mut self.codec.is_rep2_probs[state];
+                    rc.encode_bit(rep2_prob, rep - 2)?;
+                }
+            }
+
             self.rep_len_encoder.encode(rc, len, pos_state)?;
-            self.codec.state.update_long_rep();
+            self.codec.state.update_long_rep(rep as usize);
         }
         Ok(())
     }
@@ -546,7 +527,7 @@ impl<'a> EncoderPriceCalc<'a> {
         state: &State,
     ) -> RangeEncPrice {
         let pos_state = pos & self.codec.pos_mask;
-        let prob = &self.codec.is_match_probs[state.get() as usize][pos_state as usize];
+        let prob = &self.codec.is_match_probs[state.get_idx() as usize][pos_state as usize];
         let packet_price = prob.get_bit_price(0);
 
         let value_price = if state.is_literal() {
@@ -567,7 +548,7 @@ impl<'a> EncoderPriceCalc<'a> {
 
     // TODO: Rename this function to "get_match_packet_price" and any relevant variables that use it
     pub fn get_any_match_price(&self, state: &State, pos_state: u32) -> RangeEncPrice {
-        let prob = &self.codec.is_match_probs[state.get() as usize][pos_state as usize];
+        let prob = &self.codec.is_match_probs[state.get_idx() as usize][pos_state as usize];
         prob.get_bit_price(1)
     }
 
@@ -576,7 +557,7 @@ impl<'a> EncoderPriceCalc<'a> {
         any_match_price: RangeEncPrice,
         state: &State,
     ) -> RangeEncPrice {
-        let is_rep_price = &self.codec.is_rep_probs[state.get() as usize];
+        let is_rep_price = &self.codec.is_rep_probs[state.get_idx() as usize];
         any_match_price + is_rep_price.get_bit_price(0)
     }
 
@@ -585,7 +566,7 @@ impl<'a> EncoderPriceCalc<'a> {
         any_match_price: RangeEncPrice,
         state: &State,
     ) -> RangeEncPrice {
-        let is_rep_price = &self.codec.is_rep_probs[state.get() as usize];
+        let is_rep_price = &self.codec.is_rep_probs[state.get_idx() as usize];
         any_match_price + is_rep_price.get_bit_price(1)
     }
 
@@ -595,9 +576,9 @@ impl<'a> EncoderPriceCalc<'a> {
         state: &State,
         pos_state: u32,
     ) -> RangeEncPrice {
-        let is_rep0_price = &self.codec.is_rep0_probs[state.get() as usize];
+        let is_rep0_price = &self.codec.is_rep0_probs[state.get_idx() as usize];
         let is_rep0_long_price =
-            &self.codec.is_rep0_long_probs[state.get() as usize][pos_state as usize];
+            &self.codec.is_rep0_long_probs[state.get_idx() as usize][pos_state as usize];
 
         any_rep_price + is_rep0_price.get_bit_price(0) + is_rep0_long_price.get_bit_price(0)
     }
@@ -609,10 +590,10 @@ impl<'a> EncoderPriceCalc<'a> {
         state: &State,
         pos_state: u32,
     ) -> RangeEncPrice {
-        let is_rep0_price = &self.codec.is_rep0_probs[state.get() as usize];
+        let is_rep0_price = &self.codec.is_rep0_probs[state.get_idx() as usize];
         let is_rep0_long_price =
-            &self.codec.is_rep0_long_probs[state.get() as usize][pos_state as usize];
-        let is_rep1_price = &self.codec.is_rep1_probs[state.get() as usize];
+            &self.codec.is_rep0_long_probs[state.get_idx() as usize][pos_state as usize];
+        let is_rep1_price = &self.codec.is_rep1_probs[state.get_idx() as usize];
 
         let mut price = any_rep_price;
 
@@ -624,7 +605,7 @@ impl<'a> EncoderPriceCalc<'a> {
             if rep == 1 {
                 price += is_rep1_price.get_bit_price(0);
             } else {
-                let is_rep2_price = &self.codec.is_rep2_probs[state.get() as usize];
+                let is_rep2_price = &self.codec.is_rep2_probs[state.get_idx() as usize];
                 price += is_rep1_price.get_bit_price(1) + is_rep2_price.get_bit_price(rep - 2);
             }
         }
@@ -695,7 +676,7 @@ impl LZMACodecDecoder {
         output: &mut DecoderDataBuffer,
     ) -> io::Result<()> {
         let pos_state = output.position() as u32 & self.codec.pos_mask;
-        let index = self.codec.state.get() as usize;
+        let index = self.codec.state.get_idx() as usize;
 
         let prob = &mut self.codec.is_match_probs[index][pos_state as usize];
         let bit = rc.decode_bit(prob)?;
@@ -732,7 +713,7 @@ impl LZMACodecDecoder {
             self.literal_decoder
                 .decode_normal(rc, last_byte, output.position() as usize)?
         } else {
-            let prev_match_byte = output.get_byte(self.codec.reps[0]);
+            let prev_match_byte = output.get_byte(self.codec.state.get_rep(0));
             self.literal_decoder.decode_matched(
                 rc,
                 last_byte,
@@ -752,18 +733,12 @@ impl LZMACodecDecoder {
         pos_state: u32,
         rc: &mut RangeDecoder<impl Read>,
     ) -> io::Result<Match> {
-        self.codec.state.update_match();
-
-        self.codec.reps[3] = self.codec.reps[2];
-        self.codec.reps[2] = self.codec.reps[1];
-        self.codec.reps[1] = self.codec.reps[0];
-
         let len = self.match_len_decoder.decode(rc, pos_state)?;
         let slot_decoder = &mut self.codec.dist_slot_probs[get_dist_state(len)];
         let dist_slot = slot_decoder.decode_bit_tree(rc)?;
 
-        if dist_slot < DIST_MODEL_START {
-            self.codec.reps[0] = dist_slot as _;
+        let distance = if dist_slot < DIST_MODEL_START {
+            dist_slot as _
         } else {
             let limit = (dist_slot >> 1) - 1;
             let mut rep0 = (2 | (dist_slot & 1)) << limit;
@@ -776,13 +751,12 @@ impl LZMACodecDecoder {
                 rep0 |= self.codec.dist_align_probs.decode_reverse_bit_tree(rc)?;
             }
 
-            self.codec.reps[0] = rep0;
-        }
+            rep0
+        };
 
-        Ok(Match {
-            len,
-            distance: self.codec.reps[0],
-        })
+        self.codec.state.update_match(distance);
+
+        Ok(Match { len, distance })
     }
 
     fn decode_special_dist_slot(
@@ -811,43 +785,37 @@ impl LZMACodecDecoder {
         pos_state: u32,
         rc: &mut RangeDecoder<impl Read>,
     ) -> io::Result<Match> {
-        let index = self.codec.state.get() as usize;
+        let index = self.codec.state.get_idx() as usize;
 
         let prob = &mut self.codec.is_rep0_probs[index];
-        if rc.decode_bit(prob)? == 0 {
+        let rep = if rc.decode_bit(prob)? == 0 {
             let prob = &mut self.codec.is_rep0_long_probs[index][pos_state as usize];
             if rc.decode_bit(prob)? == 0 {
                 self.codec.state.update_short_rep();
                 return Ok(Match {
                     len: 1,
-                    distance: self.codec.reps[0],
+                    distance: self.codec.state.get_rep(0),
                 });
             }
+
+            0
         } else {
-            let tmp;
             let prob = &mut self.codec.is_rep1_probs[index];
             if rc.decode_bit(prob)? == 0 {
-                tmp = self.codec.reps[1];
+                1
             } else {
                 let prob = &mut self.codec.is_rep2_probs[index];
                 if rc.decode_bit(prob)? == 0 {
-                    tmp = self.codec.reps[2];
+                    2
                 } else {
-                    tmp = self.codec.reps[3];
-                    self.codec.reps[3] = self.codec.reps[2];
+                    3
                 }
-                self.codec.reps[2] = self.codec.reps[1];
             }
-            self.codec.reps[1] = self.codec.reps[0];
-            self.codec.reps[0] = tmp;
-        }
+        };
 
-        self.codec.state.update_long_rep();
+        let distance = self.codec.state.update_long_rep(rep);
         let len = self.rep_len_decoder.decode(rc, pos_state as _)?;
 
-        Ok(Match {
-            len,
-            distance: self.codec.reps[0],
-        })
+        Ok(Match { len, distance })
     }
 }
