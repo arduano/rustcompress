@@ -1,8 +1,8 @@
-use super::{super::length_codec::MATCH_LEN_MAX, EncoderPriceCalc, state::State};
+use super::{super::length_codec::MATCH_LEN_MAX, state::State, EncoderPriceCalc};
 
 use self::match_finding::{Match, MatchFinder};
 
-use super::{data_buffers::EncoderDataBuffer, LZMACodec};
+use super::data_buffers::EncoderDataBuffer;
 
 pub mod instructions_fast;
 // pub mod instructions_normal;

@@ -133,7 +133,7 @@ impl LiteralCodecEncoder {
     pub fn get_normal_price(
         &self,
         cur_byte: u8,
-        match_byte: u8,
+        _match_byte: u8,
         prev_byte: u8,
         pos: u32,
     ) -> RangeEncPrice {

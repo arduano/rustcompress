@@ -1,6 +1,6 @@
 use crate::compressors::lzma::codecs::{
     length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
-    lzma_stream_codec::{state::State, EncoderPriceCalc, LZMACodec},
+    lzma_stream_codec::{state::State, EncoderPriceCalc},
 };
 
 use super::{
