@@ -25,7 +25,6 @@ fn is_distance_sufficiently_shorter(small_dist: u32, big_dist: u32) -> bool {
 }
 
 impl LZMAInstructionPicker for LZMAFastInstructionPicker {
-    // TODO: Ensure that when this function returns, input gets skipped by the match length - 1
     fn get_next_symbol(
         &mut self,
         input: &mut LZMAEncoderInput<impl MatchFinder>,

@@ -152,6 +152,28 @@ impl EncoderDataBuffer {
         //
         // Except it loops over slices directly, making this much more auto-SIMD friendly
 
+        if start_len == max_len {
+            return start_len;
+        }
+
+        #[cfg(debug_assertions)]
+        if start_len > self.forwards_bytes() as u32 {
+            panic!(
+                "start_len: {}, forwards_bytes(): {}",
+                start_len,
+                self.forwards_bytes()
+            );
+        }
+
+        #[cfg(debug_assertions)]
+        if max_len > self.forwards_bytes() as u32 {
+            panic!(
+                "max_len: {}, forwards_bytes(): {}",
+                max_len,
+                self.forwards_bytes()
+            );
+        }
+
         let mut len = start_len;
 
         let src_index = self.get_byte_index(start_len as i32);
@@ -166,6 +188,11 @@ impl EncoderDataBuffer {
             let dst = dst[i];
 
             let mut j = 0;
+
+            if len >= max_len {
+                continue;
+            }
+
             let max = (max_len - len).min(src.len() as u32).min(dst.len() as u32);
 
             while j < max as usize {

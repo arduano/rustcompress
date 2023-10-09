@@ -273,21 +273,14 @@ impl LZMANormalInstructionPicker {
             if rep == 0 {
                 start_len = len as usize + 1;
             }
-            let len2_limit = i32::min(self.nice_len as i32, avail - len as i32 - 1);
-            // assert!(
-            //     len2_limit >= 0,
-            //     "len2_limit>=0, len2_limit={}, avail={}, len={}",
-            //     len2_limit,
-            //     avail,
-            //     len
-            // );
+            let len2_limit = i32::min(self.nice_len as i32, avail);
             let len2 = input.buffer().get_match_length(
-                len + 1,
+                len,
                 self.opts[self.opt_cur].reps[rep] as u32,
                 len2_limit as u32,
             );
 
-            if len2 >= MATCH_LEN_MIN as u32 {
+            if len2 >= MATCH_LEN_MIN as u32 && len2 < avail as u32 {
                 // Rep
                 let mut price = long_rep_price + price_calc.get_rep_len_price(len, pos_state as _);
                 next_state.set(self.opts[self.opt_cur].state);
@@ -395,12 +388,12 @@ impl LZMANormalInstructionPicker {
             }
 
             // Try match + literal + rep0. First get the length of the rep0.
-            let len2_limit = i32::min(self.nice_len as i32, avail - len as i32 - 1);
+            let len2_limit = i32::min(self.nice_len as i32, avail);
             let len2 = input
                 .buffer()
-                .get_match_length(len + 1, dist, len2_limit as u32);
+                .get_match_length(len, dist, len2_limit as u32);
 
-            if len2 >= MATCH_LEN_MIN as _ {
+            if len2 >= MATCH_LEN_MIN as _ && len2 < avail as u32 {
                 next_state.set(self.opts[self.opt_cur].state);
                 next_state.update_match();
 
@@ -448,14 +441,7 @@ impl LZMANormalInstructionPicker {
     }
 }
 
-/// Returns true if the distance is shorter than 1/128th of the big distance,
-/// which
-fn is_distance_sufficiently_shorter(small_dist: u32, big_dist: u32) -> bool {
-    small_dist < big_dist / 128
-}
-
 impl LZMAInstructionPicker for LZMANormalInstructionPicker {
-    // TODO: Ensure that when this function returns, input gets skipped by the match length - 1
     fn get_next_symbol(
         &mut self,
         input: &mut LZMAEncoderInput<impl MatchFinder>,
@@ -466,15 +452,15 @@ impl LZMAInstructionPicker for LZMANormalInstructionPicker {
 
         // If there are pending symbols from an earlier call to this
         // function, return those symbols first.
-        let pos = input.pos();
-        assert!(pos >= 0);
         if self.opt_cur < self.opt_end {
             let len = self.opts[self.opt_cur].opt_prev as i32 - self.opt_cur as i32;
             self.opt_cur = self.opts[self.opt_cur].opt_prev;
             back = self.opts[self.opt_cur].back_prev;
             assert!(len >= 0);
 
-            if back < REPS as i32 {
+            if back == -1 {
+                return EncodeInstruction::Literal;
+            } else if back < REPS as i32 {
                 return EncodeInstruction::Rep {
                     rep_index: back as usize,
                     len: len as u32,
@@ -584,12 +570,17 @@ impl LZMAInstructionPicker for LZMANormalInstructionPicker {
         }
 
         // Return if there is neither normal nor long repeated match. Use
-        // a short match instead of a literal if is is possible and cheaper.
+        // a short match instead of a literal if it is possible and cheaper.
         self.opt_end = usize::max(main_len as usize, rep_lens[rep_best] as usize);
         if self.opt_end < MATCH_LEN_MIN {
             assert_eq!(self.opt_end, 0);
-            let rep_index = self.opts[1].back_prev as usize;
-            return EncodeInstruction::Rep { rep_index, len: 1 };
+            let back = self.opts[1].back_prev;
+            if back == -1 {
+                return EncodeInstruction::Literal;
+            } else {
+                let rep_index = self.opts[1].back_prev as usize;
+                return EncodeInstruction::Rep { rep_index, len: 1 };
+            }
         }
 
         // Update the lookup tables for distances and lengths before using
@@ -686,6 +677,10 @@ impl LZMAInstructionPicker for LZMANormalInstructionPicker {
             pos += 1;
             pos_state = pos & self.pos_mask;
 
+            if avail == 0 {
+                break;
+            }
+
             self.update_opt_state_and_reps();
             any_match_price = self.opts[self.opt_cur].price
                 + price_calc.get_any_match_price(&self.opts[self.opt_cur].state, pos_state);
@@ -760,7 +755,6 @@ struct Optimum {
 }
 
 impl Optimum {
-    const INFINITY_PRICE: u32 = 1 << 30;
     fn reset(&mut self) {
         // TODO: Refactor this to be more atomic
         self.price = RangeEncPrice::infinity();

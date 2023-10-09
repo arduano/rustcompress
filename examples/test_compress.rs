@@ -20,6 +20,7 @@ use rustcompress::compressors::lzma::codecs::{
 
 fn main() {
     let data = include_bytes!("./test_compress.rs");
+    let data = &data[..30];
 
     let header = LzmaHeader {
         dict_size: 0x4000,
@@ -35,6 +36,7 @@ fn main() {
 
     let mut rc = RangeEncoder::new(&mut compressed);
     let nice_len = 270;
+    // let picker = LZMAFastInstructionPicker::new(nice_len);
     let picker = LZMANormalInstructionPicker::new(nice_len, header.props.pb as u32);
     let mut encoder = LZMACodecEncoder::new(
         header.dict_size,
@@ -78,17 +80,14 @@ fn main() {
         // }
     }
 
-    while encoder_buffer.forward_bytes() > 0 {
-        let forward_before = encoder_buffer.forward_bytes();
-
+    while encoder.position() < data.len() as u64 {
         dbg!(encoder_buffer.forward_bytes());
 
-        encoder
+        let encoded_bytes = encoder
             .encode_one_packet(&mut rc, &mut encoder_buffer)
             .unwrap();
 
-        let forward_after = encoder_buffer.forward_bytes();
-        let offset = forward_before - forward_after;
+        let offset = encoded_bytes as usize;
         dbg!(String::from_utf8_lossy(&data[passed..passed + offset]));
         passed += offset;
     }

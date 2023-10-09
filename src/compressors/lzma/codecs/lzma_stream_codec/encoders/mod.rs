@@ -6,6 +6,7 @@ use super::{data_buffers::EncoderDataBuffer, LZMACodec};
 
 pub mod instructions_fast;
 pub mod instructions_normal;
+pub mod instructions_normal2;
 pub mod match_finding;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,10 +54,10 @@ impl<M: MatchFinder> LZMAEncoderInput<M> {
             match_finder,
             matches_calculated: false,
 
-            // TODO: Investigate `MATCH_LEN_MAX * 10`. It means that the maximum forwards bytes would be
+            // TODO: Investigate `MATCH_LEN_MAX * 20`. It means that the maximum forwards bytes would be
             // 10 times the maximum match length, which lets us do less buffer copy operations
             // when feeding input data.
-            buffer: EncoderDataBuffer::new(dict_size, MATCH_LEN_MAX as u32 * 10),
+            buffer: EncoderDataBuffer::new(dict_size, MATCH_LEN_MAX as u32 * 20),
 
             dict_size,
         }

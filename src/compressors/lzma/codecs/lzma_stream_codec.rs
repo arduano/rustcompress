@@ -152,6 +152,8 @@ impl LZMACodec {
 
 pub struct LZMACodecEncoder<Mode: LZMAInstructionPicker> {
     codec: LZMACodec,
+    position: u64,
+    dict_size: u32,
 
     literal_encoder: LiteralCodecEncoder,
     match_len_encoder: LengthCodecEncoder,
@@ -167,6 +169,8 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
     pub fn new(dict_size: u32, lc: u32, lp: u32, pb: u32, nice_len: u32, picker: Mode) -> Self {
         Self {
             codec: LZMACodec::new(pb),
+            position: dict_size as u64,
+            dict_size,
 
             literal_encoder: LiteralCodecEncoder::new(lc, lp),
             match_len_encoder: LengthCodecEncoder::new(pb, nice_len),
@@ -178,13 +182,15 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
         }
     }
 
+    pub fn position(&self) -> u64 {
+        self.position - self.dict_size as u64
+    }
+
     /// Get the next instruction, progressing the input buffer forwards by the according ammount
     fn get_next_instruction(
         &mut self,
         input: &mut LZMAEncoderInput<impl MatchFinder>,
     ) -> EncodeInstruction {
-        let pos = input.pos();
-
         let mut price_calc = EncoderPriceCalc {
             data: &mut self.data,
             codec: &self.codec,
@@ -197,15 +203,15 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
             .picker
             .get_next_symbol(input, &mut price_calc, &self.codec);
 
-        let bytes_to_encode = instruction.length();
+        dbg!(instruction);
 
-        let new_pos = pos + bytes_to_encode as u64;
-        if input.pos() > new_pos {
-            // The instruction picker mismanaged the buffer position
-            // panic!("input.pos(): {}, new_pos: {}", input.pos(), new_pos);
-        } else if input.pos() < new_pos {
+        let bytes_to_encode = instruction.length();
+        self.position += bytes_to_encode as u64;
+
+        // Catch up to the position if necessary
+        if input.pos() < self.position {
             // Progress the buffer ourselves
-            input.skip((new_pos - input.pos()) as u32);
+            input.skip((self.position - input.pos()) as u32);
         }
 
         instruction
@@ -261,8 +267,12 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
         // The length of the literal is always 1
         let length = 1;
 
-        let symbol = input.buffer().get_byte(0 - length);
-        let prev_byte = input.buffer().get_byte(-1 - length);
+        // If the input has been read ahead, we need to make sure we have the right offset
+        let pos_diff = input.pos() - self.position;
+
+        // TODO: Ensure that whenever the input buffer is appeneded to *when input is ahead of this encoder*, it doesn't overwrite the data that we're reading here
+        let symbol = input.buffer().get_byte(0 - length - pos_diff as i32);
+        let prev_byte = input.buffer().get_byte(-1 - length - pos_diff as i32);
 
         if self.codec.state.is_literal() {
             self.literal_encoder
