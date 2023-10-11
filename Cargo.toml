@@ -5,6 +5,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+unsafe = []
+
 [dependencies]
 array-macro = "2.1.5"
 byteorder = "1.4.3"
@@ -32,5 +35,6 @@ harness = false
 name = "compress"
 harness = false
 
-[profile.release]
+[profile.profiling]
+inherits = "release"
 debug = true

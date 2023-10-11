@@ -19,7 +19,7 @@ fn main() {
         data.extend_from_slice(data_part);
     }
 
-    for i in 0..20 {
+    for i in 0..1 {
         dbg!(i);
         let header = LzmaHeader {
             dict_size: 0x4000,

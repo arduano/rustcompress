@@ -280,8 +280,23 @@ impl LengthCodecEncoder {
         Ok(())
     }
 
+    #[inline(always)]
     pub fn get_price(&self, len: usize, pos_state: usize) -> RangeEncPrice {
-        self.pos_state_prices[pos_state].prices[len - MATCH_LEN_MIN]
+        let len_index = len - MATCH_LEN_MIN;
+
+        #[cfg(all(feature = "unsafe", not(debug_assertions)))]
+        // Skip the length checks when indexing the arrays.
+        // This *should* be safe because the length and pos_states are supposed to have well defined bounds.
+        if len_index >= MAX_NICE_LEN - MATCH_LEN_MIN
+            || pos_state >= self.pos_state_prices.len()
+            || pos_state >= 16
+        {
+            unsafe {
+                core::hint::unreachable_unchecked();
+            }
+        }
+
+        self.pos_state_prices[pos_state].prices[len_index]
     }
 
     /// Update the prices of all pos_states that have counted down to 0.

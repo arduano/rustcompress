@@ -120,6 +120,7 @@ impl<'a> EncoderPriceCalc<'a> {
         }
     }
 
+    #[inline(always)]
     pub fn get_literal_price(
         &self,
         cur_byte: u8,
@@ -143,12 +144,14 @@ impl<'a> EncoderPriceCalc<'a> {
         packet_price + value_price
     }
 
+    #[inline(always)]
     pub fn get_rep_len_price(&self, len: u32, pos_state: u32) -> RangeEncPrice {
         self.rep_len_encoder
             .get_price(len as usize, pos_state as usize)
     }
 
     // TODO: Rename this function to "get_match_packet_price" and any relevant variables that use it
+    #[inline(always)]
     pub fn get_any_match_price(&self, state: &State, pos_state: u32) -> AnyMatchPrice {
         let prob = &self.codec.is_match_probs[state.get_idx() as usize][pos_state as usize];
         AnyMatchPrice {
@@ -270,6 +273,7 @@ pub struct AnyMatchPrice<'a> {
 }
 
 impl<'a> AnyMatchPrice<'a> {
+    #[inline(always)]
     pub fn get_normal_match_price(self) -> NormalMatchPrice<'a> {
         let is_rep_price = &self.price_calc.codec.is_rep_probs[self.state_idx];
         NormalMatchPrice {
@@ -279,6 +283,7 @@ impl<'a> AnyMatchPrice<'a> {
         }
     }
 
+    #[inline(always)]
     pub fn get_any_rep_price(self) -> AnyRepPrice<'a> {
         let is_rep_price = &self.price_calc.codec.is_rep_probs[self.state_idx];
         AnyRepPrice {
@@ -298,6 +303,7 @@ pub struct NormalMatchPrice<'a> {
 }
 
 impl<'a> NormalMatchPrice<'a> {
+    #[inline(always)]
     pub fn get_price_with_dist_len(self, dist: u32, len: u32) -> RangeEncPrice {
         let mut price = self.normal_match_price
             + self
@@ -329,6 +335,7 @@ pub struct AnyRepPrice<'a> {
 }
 
 impl<'a> AnyRepPrice<'a> {
+    #[inline(always)]
     pub fn get_short_rep_price(self) -> RangeEncPrice {
         let is_rep0_price = &self.price_calc.codec.is_rep0_probs[self.state_idx];
         let is_rep0_long_price =
@@ -337,6 +344,7 @@ impl<'a> AnyRepPrice<'a> {
         self.any_rep_price + is_rep0_price.get_bit_price(0) + is_rep0_long_price.get_bit_price(0)
     }
 
+    #[inline(always)]
     pub fn get_long_rep_price(self, rep: u32) -> LongRepPrice<'a> {
         let is_rep0_price = &self.price_calc.codec.is_rep0_probs[self.state_idx];
         let is_rep0_long_price =
@@ -374,6 +382,7 @@ pub struct LongRepPrice<'a> {
 }
 
 impl<'a> LongRepPrice<'a> {
+    #[inline(always)]
     pub fn get_price_with_len(&self, len: u32) -> RangeEncPrice {
         self.long_rep_price
             + self
