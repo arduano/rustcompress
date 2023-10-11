@@ -9,10 +9,7 @@ use rustcompress::compressors::lzma::codecs::{
     lzma_stream_codec::{
         data_buffers::DecoderDataBuffer,
         encoders::{
-            instructions_fast::LZMAFastInstructionPicker,
-            // instructions_normal::LZMANormalInstructionPicker,
-            instructions_normal::LZMANormalInstructionPicker,
-            match_finding::hc4::HC4MatchFinder,
+            instructions_normal::LZMANormalInstructionPicker, match_finding::hc4::HC4MatchFinder,
             LZMAEncoderInput,
         },
         LZMACodecDecoder, LZMACodecEncoder,

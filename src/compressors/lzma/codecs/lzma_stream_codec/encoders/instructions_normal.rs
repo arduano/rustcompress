@@ -1,11 +1,9 @@
-use std::collections::VecDeque;
-
 use crate::compressors::lzma::codecs::{
     length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
     lzma_stream_codec::{
         prices::{AnyRepPrice, NormalMatchPrice},
         state::State,
-        EncoderPriceCalc, LZMACodec,
+        EncoderPriceCalc,
     },
     range_codec::RangeEncPrice,
 };

@@ -3,7 +3,6 @@ use rustcompress::compressors::lzma::codecs::{
     length_codec::MATCH_LEN_MAX,
     lzma_stream_codec::{
         encoders::{
-            instructions_fast::LZMAFastInstructionPicker,
             instructions_normal::LZMANormalInstructionPicker, match_finding::hc4::HC4MatchFinder,
             LZMAEncoderInput,
         },

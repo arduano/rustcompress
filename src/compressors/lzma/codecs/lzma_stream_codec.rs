@@ -225,7 +225,7 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
             EncodeInstruction::Literal(ctx) => {
                 rc.encode_bit(is_match_prob, 0)?;
 
-                self.encode_literal(rc, input, pos as u32, ctx)?;
+                self.encode_literal(rc, pos as u32, ctx)?;
             }
             EncodeInstruction::Match(match_) => {
                 rc.encode_bit(is_match_prob, 1)?;
@@ -251,7 +251,6 @@ impl<Mode: LZMAInstructionPicker> LZMACodecEncoder<Mode> {
     fn encode_literal(
         &mut self,
         rc: &mut RangeEncoder<impl Write>,
-        input: &mut LZMAEncoderInput<impl MatchFinder>,
         pos: u32,
         ctx: LiteralCtx,
     ) -> io::Result<()> {
