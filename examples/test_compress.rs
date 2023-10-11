@@ -11,6 +11,7 @@ use rustcompress::compressors::lzma::codecs::{
         encoders::{
             instructions_fast::LZMAFastInstructionPicker,
             // instructions_normal::LZMANormalInstructionPicker,
+            instructions_normal::LZMANormalInstructionPicker,
             match_finding::hc4::HC4MatchFinder,
             LZMAEncoderInput,
         },
@@ -37,8 +38,8 @@ fn main() {
 
     let mut rc = RangeEncoder::new(&mut compressed);
     let nice_len = 270;
-    let picker = LZMAFastInstructionPicker::new(nice_len);
-    // let picker = LZMANormalInstructionPicker::new(nice_len, header.props.pb as u32);
+    // let picker = LZMAFastInstructionPicker::new(nice_len);
+    let picker = LZMANormalInstructionPicker::new(nice_len, header.props.pb as u32);
     let mut encoder = LZMACodecEncoder::new(
         header.dict_size,
         header.props.lc as u32,
@@ -120,4 +121,6 @@ fn main() {
     dbg!(flushed);
 
     assert_eq!(data, &output[..]);
+
+    dbg!(compressed.len());
 }

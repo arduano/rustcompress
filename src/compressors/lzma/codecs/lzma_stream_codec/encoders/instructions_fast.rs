@@ -5,7 +5,7 @@ use crate::compressors::lzma::codecs::{
 
 use super::{
     match_finding::{Match, MatchFinder},
-    EncodeInstruction, LZMAEncoderInput, LZMAInstructionPicker,
+    EncodeInstruction, LZMAEncoderInput, LZMAInstructionPicker, LiteralCtx,
 };
 
 pub struct LZMAFastInstructionPicker {
@@ -33,9 +33,19 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
     ) -> EncodeInstruction {
         let avail = input.buffer().forwards_bytes().min(MATCH_LEN_MAX);
 
+        // Make a literal here so we can easily return it in other places later
+        let next_byte = input.buffer().get_byte(0);
+        let prev_byte = input.buffer().get_byte(-1);
+        let match_byte = input.buffer().get_byte(-(state.reps()[0] as i32) - 1);
+        let literal_ctx = LiteralCtx {
+            byte: next_byte,
+            match_byte,
+            prev_byte,
+        };
+
         // If there aren't enough bytes to encode a match, just return None
         if avail < MATCH_LEN_MIN {
-            return EncodeInstruction::Literal;
+            return EncodeInstruction::Literal(literal_ctx);
         }
 
         // Cache the lengths as they're used multiple times
@@ -114,7 +124,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
         }
 
         if main_len == 0 {
-            return EncodeInstruction::Literal;
+            return EncodeInstruction::Literal(literal_ctx);
         }
 
         // Get the next match. Test if it is better than the current match.
@@ -134,7 +144,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
                     && main_len >= MATCH_LEN_MIN as u32 + 1
                     && is_distance_sufficiently_shorter(next_match.distance as _, main_dist as _))
             {
-                return EncodeInstruction::Literal;
+                return EncodeInstruction::Literal(literal_ctx);
             }
         }
 
@@ -143,7 +153,7 @@ impl LZMAInstructionPicker for LZMAFastInstructionPicker {
         // to make sure the algorithm actually matches. There's some confusing conditions here.
         let limit = (main_len - 1).max(MATCH_LEN_MIN as _);
         if rep_lens.into_iter().any(|r| r >= limit) {
-            return EncodeInstruction::Literal;
+            return EncodeInstruction::Literal(literal_ctx);
         }
 
         return EncodeInstruction::Match(Match {

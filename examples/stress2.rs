@@ -3,7 +3,8 @@ use rustcompress::compressors::lzma::codecs::{
     length_codec::MATCH_LEN_MAX,
     lzma_stream_codec::{
         encoders::{
-            instructions_fast::LZMAFastInstructionPicker, match_finding::hc4::HC4MatchFinder,
+            instructions_fast::LZMAFastInstructionPicker,
+            instructions_normal::LZMANormalInstructionPicker, match_finding::hc4::HC4MatchFinder,
             LZMAEncoderInput,
         },
         LZMACodecEncoder,
@@ -12,10 +13,10 @@ use rustcompress::compressors::lzma::codecs::{
 };
 
 fn main() {
-    let data_part = include_bytes!("../src/compressors/lzma/codecs/lzma_stream_codec.rs");
+    let data_part = include_bytes!("/mnt/fat/Midis/tau2.5.9.mid");
 
     let mut data = Vec::new();
-    for _ in 0..100 {
+    for _ in 0..1 {
         data.extend_from_slice(data_part);
     }
 
@@ -35,7 +36,8 @@ fn main() {
 
         let mut rc = RangeEncoder::new(&mut compressed);
         let nice_len = 270;
-        let picker = LZMAFastInstructionPicker::new(nice_len);
+        // let picker = LZMAFastInstructionPicker::new(nice_len);
+        let picker = LZMANormalInstructionPicker::new(nice_len, header.props.pb as u32);
         let mut encoder = LZMACodecEncoder::new(
             header.dict_size,
             header.props.lc as u32,
@@ -89,5 +91,7 @@ fn main() {
         }
 
         rc.finish().unwrap();
+
+        dbg!(compressed.len());
     }
 }

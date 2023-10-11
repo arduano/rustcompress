@@ -1,442 +1,272 @@
+use std::collections::VecDeque;
+
 use crate::compressors::lzma::codecs::{
     length_codec::{MATCH_LEN_MAX, MATCH_LEN_MIN},
-    lzma_stream_codec::{state::State, EncoderPriceCalc, LZMACodec},
+    lzma_stream_codec::{
+        prices::{AnyRepPrice, NormalMatchPrice},
+        state::State,
+        EncoderPriceCalc, LZMACodec,
+    },
     range_codec::RangeEncPrice,
 };
 
 use super::{
     match_finding::{Match, MatchFinder},
-    EncodeInstruction, LZMAEncoderInput, LZMAInstructionPicker,
+    EncodeInstruction, LZMAEncoderInput, LZMAInstructionPicker, LiteralCtx,
 };
+
+const MAX_NODE_GRAPH_LEN: usize = 4096 - MATCH_LEN_MAX;
 
 pub struct LZMANormalInstructionPicker {
     nice_len: u32,
-    opts: Vec<Optimum>,
-    opt_cur: usize,
-    opt_end: usize,
     pos_mask: u32,
 
-    matches_cache: Vec<Match>,
+    /// The "graph" of instructions and price nodes.
+    /// The nodes are picked based on the current node and the length, and are assigned
+    /// if they are cheaper than the destination node's current price. After that,
+    /// the graph is traversed in reverse to find the best price path.
+    /// This is somewhat similar to Dijkstra's path finding algorithm.
+    node_graph: Vec<PriceNode>,
+    graph_start_pos: u64,
+
+    instruction_cache_stack: Vec<EncodeInstruction>,
 }
 
 impl LZMANormalInstructionPicker {
     const OPTS: u32 = 4096;
-    pub const EXTRA_SIZE_BEFORE: u32 = Self::OPTS;
-    pub const EXTRA_SIZE_AFTER: u32 = Self::OPTS;
 
     pub fn new(nice_len: u32, pb: u32) -> Self {
         Self {
             nice_len,
-            opts: vec![Optimum::default(); Self::OPTS as usize],
-            opt_cur: 0,
-            opt_end: 0,
             pos_mask: (1 << pb) - 1,
-            matches_cache: Vec::new(),
+
+            node_graph: Vec::new(),
+            graph_start_pos: 0,
+
+            instruction_cache_stack: Vec::new(),
         }
     }
 
-    fn convert_opts(&mut self, back: &mut i32) -> usize {
-        self.opt_end = self.opt_cur;
-
-        let mut opt_prev = self.opts[self.opt_cur].opt_prev;
-
-        loop {
-            let opt_index = self.opt_cur;
-
-            if self.opts[opt_index].prev1_is_literal {
-                self.opts[opt_prev].opt_prev = self.opt_cur;
-                self.opts[opt_prev].back_prev = -1;
-                self.opt_cur = opt_prev;
-                opt_prev -= 1;
-
-                if self.opts[opt_index].has_prev2 {
-                    self.opts[opt_prev].opt_prev = opt_prev + 1;
-                    self.opts[opt_prev].back_prev = self.opts[opt_index].back_prev2;
-                    self.opt_cur = opt_prev;
-                    opt_prev = self.opts[opt_index].opt_prev2;
-                }
-            }
-
-            let temp = self.opts[opt_prev].opt_prev;
-            self.opts[opt_prev].opt_prev = self.opt_cur;
-            self.opt_cur = opt_prev;
-            opt_prev = temp;
-            if self.opt_cur <= 0 {
-                break;
-            }
-        }
-
-        self.opt_cur = self.opts[0].opt_prev;
-        *back = self.opts[self.opt_cur].back_prev;
-        return self.opt_cur;
-    }
-
-    fn update_opt_state_and_reps(&mut self) {
-        let mut opt_prev = self.opts[self.opt_cur].opt_prev;
-        assert!(opt_prev < self.opt_cur);
-
-        if self.opts[self.opt_cur].prev1_is_literal {
-            opt_prev -= 1;
-
-            if self.opts[self.opt_cur].has_prev2 {
-                let state = self.opts[self.opts[self.opt_cur].opt_prev2].state;
-                self.opts[self.opt_cur].state.set(state);
-                if self.opts[self.opt_cur].back_prev2 < REPS as i32 {
-                    self.opts[self.opt_cur].state.update_long_rep();
-                } else {
-                    self.opts[self.opt_cur].state.update_match();
-                }
-            } else {
-                let state = self.opts[opt_prev].state;
-                self.opts[self.opt_cur].state.set(state);
-            }
-
-            self.opts[self.opt_cur].state.update_literal();
-        } else {
-            let state = self.opts[opt_prev].state;
-            self.opts[self.opt_cur].state.set(state);
-        }
-
-        if opt_prev == self.opt_cur - 1 {
-            // Must be either a short rep or a literal.
-            assert!(
-                self.opts[self.opt_cur].back_prev == 0 || self.opts[self.opt_cur].back_prev == -1
-            );
-
-            if self.opts[self.opt_cur].back_prev == 0 {
-                self.opts[self.opt_cur].state.update_short_rep();
-            } else {
-                self.opts[self.opt_cur].state.update_literal();
-            }
-
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    self.opts[opt_prev].reps.as_ptr(),
-                    self.opts[self.opt_cur].reps.as_mut_ptr(),
-                    REPS,
-                );
-            }
-        } else {
-            let back;
-            if self.opts[self.opt_cur].prev1_is_literal && self.opts[self.opt_cur].has_prev2 {
-                opt_prev = self.opts[self.opt_cur].opt_prev2;
-                back = self.opts[self.opt_cur].back_prev2;
-                self.opts[self.opt_cur].state.update_long_rep();
-            } else {
-                back = self.opts[self.opt_cur].back_prev;
-                if back < REPS as i32 {
-                    self.opts[self.opt_cur].state.update_long_rep();
-                } else {
-                    self.opts[self.opt_cur].state.update_match();
-                }
-            }
-
-            if back < REPS as i32 {
-                self.opts[self.opt_cur].reps[0] = self.opts[opt_prev].reps[back as usize];
-
-                for rep in 1..=back as usize {
-                    self.opts[self.opt_cur].reps[rep] = self.opts[opt_prev].reps[rep - 1];
-                }
-                for rep in (back as usize + 1)..REPS {
-                    self.opts[self.opt_cur].reps[rep] = self.opts[opt_prev].reps[rep];
-                }
-            } else {
-                self.opts[self.opt_cur].reps[0] = back as u32 - REPS as u32;
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        self.opts[opt_prev].reps.as_ptr(),
-                        self.opts[self.opt_cur].reps[1..].as_mut_ptr(),
-                        REPS - 1,
-                    );
-                }
-            }
+    fn ensure_capacity_for_pos(&mut self, pos: usize) {
+        let capacity = pos + 1;
+        if self.node_graph.len() < capacity {
+            self.node_graph.resize(capacity, PriceNode::none());
         }
     }
 
-    fn calc1_byte_prices(
+    fn get_curr_node_index(&self, input: &LZMAEncoderInput<impl MatchFinder>) -> usize {
+        let pos = input.pos();
+        debug_assert!(pos >= self.graph_start_pos);
+        (pos - self.graph_start_pos) as usize
+    }
+
+    fn reset_and_prepare_graph(
         &mut self,
-        input: &mut LZMAEncoderInput<impl MatchFinder>,
-        price_calc: &EncoderPriceCalc,
-        pos: u32,
-        pos_state: u32,
-        avail: i32,
-        any_rep_price: RangeEncPrice,
+        input: &LZMAEncoderInput<impl MatchFinder>,
+        state: State,
     ) {
-        // This will be set to true if using a literal or a short rep.
-        let mut next_is_byte = false;
-        let cur_byte = input.buffer().get_byte(0);
-        let match_byte = input
-            .buffer()
-            .get_byte(-(self.opts[self.opt_cur].reps[0] as i32) - 1);
+        self.node_graph.clear();
+        self.node_graph.push(PriceNode::initial(state));
+        self.graph_start_pos = input.pos() as u64;
+    }
 
-        // Try a literal.
-        let literal_price = self.opts[self.opt_cur].price
+    /// Try:
+    /// - Single literal
+    /// - Single short rep
+    /// - Literal + rep0
+    fn try_one_length_opts(
+        &mut self,
+        input: &LZMAEncoderInput<impl MatchFinder>,
+        price_calc: &EncoderPriceCalc,
+        any_rep_price: AnyRepPrice,
+    ) {
+        let current_node_idx = self.get_curr_node_index(input);
+        let node = self.node_graph[current_node_idx];
+        let rep0 = node.state.get_rep(0);
+        let price = node.price;
+
+        let pos = input.pos();
+        let available = input.buffer().forwards_bytes().min(MATCH_LEN_MAX); // We assume this is >= 1
+
+        let curr_byte = input.buffer().get_byte(0);
+        let prev_byte = input.buffer().get_byte(-1);
+        let match_byte = input.buffer().get_byte(-(rep0 as i32) - 1);
+
+        let literal_ctx = LiteralCtx {
+            byte: curr_byte,
+            match_byte,
+            prev_byte,
+        };
+
+        // Literal price
+        let price_literal = price
             + price_calc.get_literal_price(
-                cur_byte as _,
-                match_byte as _,
-                input.buffer().get_byte(-1),
-                pos,
-                &self.opts[self.opt_cur].state,
+                curr_byte,
+                match_byte,
+                prev_byte,
+                pos as u32,
+                &node.state,
             );
-        if literal_price < self.opts[self.opt_cur + 1].price {
-            self.opts[self.opt_cur + 1].set1(literal_price, self.opt_cur, -1);
-            next_is_byte = true;
-        }
-        let mut next_state = State::new();
-        // Try a short rep.
-        if match_byte == cur_byte
-            && (self.opts[self.opt_cur + 1].opt_prev == self.opt_cur
-                || self.opts[self.opt_cur + 1].back_prev != 0)
-        {
-            let short_rep_price = price_calc.get_short_rep_price(
-                any_rep_price,
-                &self.opts[self.opt_cur].state,
-                pos_state,
-            );
-            if short_rep_price <= self.opts[self.opt_cur + 1].price {
-                self.opts[self.opt_cur + 1].set1(short_rep_price, self.opt_cur, 0);
-                next_is_byte = true;
+
+        let can_be_short_rep0 = curr_byte == match_byte;
+
+        // Short rep price
+        let price_short_rep = price + any_rep_price.get_short_rep_price();
+
+        self.ensure_capacity_for_pos(current_node_idx + 1);
+
+        let next_node = &mut self.node_graph[current_node_idx + 1];
+
+        // Check if either of the options are cheaper than the next node's price.
+        let min_price = price_literal.min(price_short_rep);
+        if next_node.price > min_price {
+            // Check which one was cheaper, and assign the node accordingly.
+            if price_short_rep < price_literal && can_be_short_rep0 {
+                *next_node = node.add_short_rep(price_short_rep);
+            } else {
+                *next_node = node.add_literal(price_literal, literal_ctx);
             }
         }
 
-        // If neither a literal nor a short rep was the cheapest choice,
-        // try literal + long rep0.
-        if !next_is_byte && match_byte != cur_byte && avail > MATCH_LEN_MIN as i32 {
-            let len_limit = (self.nice_len as i32).min(avail - 1);
-            // TODO: remove i32?
-            let len = input.buffer().get_match_length(
-                1,
-                self.opts[self.opt_cur].reps[0] as u32,
-                len_limit as u32,
-            );
+        // Get rep0 length
+        let rep0_len = input.buffer().get_match_length(1, rep0, available as u32) - 1;
 
-            if len >= MATCH_LEN_MIN as u32 {
-                next_state.set(self.opts[self.opt_cur].state);
-                next_state.update_literal();
-                let next_pos_state = (pos + 1) & self.pos_mask;
-                let price = literal_price
-                    + price_calc.get_long_rep_and_len_price(0, len, &next_state, next_pos_state);
+        // Get the rep0 price of the next position ahead
+        let mut lit_state = node.state;
+        lit_state.update_literal();
+        let next_pos_state = (pos + 1) as u32 & self.pos_mask;
+        let rep0_price = price_calc
+            .get_any_match_price(&lit_state, next_pos_state)
+            .get_any_rep_price()
+            .get_long_rep_price(0);
 
-                let i = self.opt_cur + 1 + len as usize;
-                while self.opt_end < i {
-                    self.opt_end += 1;
-                    self.opts[self.opt_end].reset();
-                }
-                if price < self.opts[i].price {
-                    self.opts[i].set2(price, self.opt_cur, 0);
-                }
+        if rep0_len >= MATCH_LEN_MIN as u32 {
+            let price_lit_rep0 = price_literal + rep0_price.get_price_with_len(rep0_len);
+
+            let index = current_node_idx + rep0_len as usize + 1;
+            self.ensure_capacity_for_pos(index);
+            let next_node = &mut self.node_graph[index];
+
+            if next_node.price > price_lit_rep0 {
+                *next_node = node.add_lit_rep0(price_lit_rep0, literal_ctx, rep0_len);
             }
         }
     }
 
-    fn calc_long_rep_prices(
-        &mut self,
-        input: &mut LZMAEncoderInput<impl MatchFinder>,
-        price_calc: &EncoderPriceCalc,
-        pos: u32,
-        pos_state: u32,
-        avail: i32,
-        any_rep_price: RangeEncPrice,
-    ) -> usize {
-        let mut start_len = MATCH_LEN_MIN;
-        let len_limit = avail.min(self.nice_len as i32);
-        let mut next_state = State::new();
+    /// Try:
+    /// - All reps
+    fn try_reps(&mut self, input: &LZMAEncoderInput<impl MatchFinder>, any_rep_price: AnyRepPrice) {
+        let current_node_idx = self.get_curr_node_index(input);
+        let node = self.node_graph[current_node_idx];
+        let price = node.price;
 
-        for rep in 0..REPS {
-            let len = input.buffer().get_match_length(
-                0,
-                self.opts[self.opt_cur].reps[rep] as u32,
-                len_limit as u32,
-            );
-            if len < MATCH_LEN_MIN as u32 {
-                continue;
-            }
-            while self.opt_end < self.opt_cur + len as usize {
-                self.opt_end += 1;
-                self.opts[self.opt_end].reset();
-            }
-            let long_rep_price = price_calc.get_long_rep_price(
-                any_rep_price,
-                rep as u32,
-                &self.opts[self.opt_cur].state,
-                pos_state,
-            );
+        let available = input.buffer().forwards_bytes().min(MATCH_LEN_MAX);
 
-            // i=len;i>=MATCH_LEN_MIN;--i
-            for i in (MATCH_LEN_MIN..=len as usize).rev() {
-                let price = long_rep_price + price_calc.get_rep_len_price(i as u32, pos_state);
-                if price < self.opts[self.opt_cur + i].price {
-                    self.opts[self.opt_cur + i].set1(price, self.opt_cur, rep as i32);
-                }
-            }
-
-            if rep == 0 {
-                start_len = len as usize + 1;
-            }
-            let len2_limit = i32::min(self.nice_len as i32, avail);
-            let len2 = input.buffer().get_match_length(
-                len,
-                self.opts[self.opt_cur].reps[rep] as u32,
-                len2_limit as u32,
-            );
-
-            if len2 >= MATCH_LEN_MIN as u32 && len2 < avail as u32 {
-                // Rep
-                let mut price = long_rep_price + price_calc.get_rep_len_price(len, pos_state as _);
-                next_state.set(self.opts[self.opt_cur].state);
-                next_state.update_long_rep();
-
-                // Literal
-                let cur_byte = input.buffer().get_byte(len as i32);
-                let match_byte = input.buffer().get_byte(0);
-                let prev_byte = input.buffer().get_byte(len as i32 - 1);
-                price += price_calc.get_literal_price(
-                    cur_byte,
-                    match_byte,
-                    prev_byte,
-                    pos + len as u32,
-                    &next_state,
-                );
-                next_state.update_literal();
-
-                // Rep0
-                let next_pos_state = (pos + len as u32 + 1) & self.pos_mask;
-                price +=
-                    price_calc.get_long_rep_and_len_price(0, len2, &next_state, next_pos_state);
-
-                let i = self.opt_cur + len as usize + 1 + len2 as usize;
-                while self.opt_end < i {
-                    self.opt_end += 1;
-                    self.opts[self.opt_end].reset();
-                }
-                if price < self.opts[i].price {
-                    self.opts[i].set3(price, self.opt_cur, rep as _, len as usize, 0);
-                }
-            }
-        }
-
-        return start_len;
-    }
-
-    fn calc_normal_match_prices(
-        &mut self,
-        input: &mut LZMAEncoderInput<impl MatchFinder>,
-        price_calc: &EncoderPriceCalc,
-        pos: u32,
-        pos_state: u32,
-        avail: i32,
-        any_match_price: RangeEncPrice,
-        start_len: u32,
-    ) {
-        let matches = input.calc_matches();
-        self.matches_cache.clear();
-        self.matches_cache.extend_from_slice(&matches);
-
-        let mut matches = &mut self.matches_cache[..];
-
-        {
-            // If the longest match is so long that it would not fit into
-            // the opts array, shorten the matches.
-
-            let last = matches.last().unwrap(); // TODO: What if there are 0 matches?
-                                                // TODO: Is last.len ever bigger than avail, or does the match finder handle that?
-
-            if last.len as i32 > avail {
-                let mut i = 0;
-                while (matches[i].len as i32) < avail {
-                    i += 1;
-                }
-                matches[i].len = avail as u32;
-                matches = &mut matches[..=i];
-            }
-
-            let last = matches.last().unwrap();
-            if last.len < start_len {
-                return;
-            }
-            while self.opt_end < self.opt_cur + last.len as usize {
-                self.opt_end += 1;
-                self.opts[self.opt_end].reset();
-            }
-        }
-        let normal_match_price =
-            price_calc.get_normal_match_price(any_match_price, &self.opts[self.opt_cur].state);
-
-        let mut match_ = 0;
-        while start_len > matches[match_].len {
-            match_ += 1;
-        }
-        let mut len = start_len;
-        let mut next_state = State::new();
-        loop {
-            let dist = matches[match_].distance;
-
-            // Calculate the price of a match of len bytes from the nearest
-            // possible distance.
-            let match_and_len_price =
-                price_calc.get_match_and_len_price(normal_match_price, dist as _, len, pos_state);
-            if match_and_len_price < self.opts[self.opt_cur + len as usize].price {
-                self.opts[self.opt_cur + len as usize].set1(
-                    match_and_len_price,
-                    self.opt_cur,
-                    dist as i32 + REPS as i32,
-                );
-            }
-            if len != matches[match_].len {
-                len += 1;
-                continue;
-            }
-
-            // Try match + literal + rep0. First get the length of the rep0.
-            let len2_limit = i32::min(self.nice_len as i32, avail);
-            let len2 = input
+        for rep_id in 0..node.state.reps().len() {
+            let rep_dist = node.state.get_rep(rep_id);
+            let rep_len = input
                 .buffer()
-                .get_match_length(len, dist, len2_limit as u32);
+                .get_match_length(0, rep_dist, available as u32);
 
-            if len2 >= MATCH_LEN_MIN as _ && len2 < avail as u32 {
-                next_state.set(self.opts[self.opt_cur].state);
-                next_state.update_match();
+            if rep_len < MATCH_LEN_MIN as u32 {
+                continue;
+            }
 
-                // Literal
-                let cur_byte = input.buffer().get_byte(len as i32);
-                let match_byte = input.buffer().get_byte(0);
-                let prev_byte = input.buffer().get_byte(len as i32 - 1);
-                let mut price = match_and_len_price
-                    + price_calc.get_literal_price(
-                        cur_byte,
-                        match_byte,
-                        prev_byte,
-                        pos + len,
-                        &next_state,
-                    );
-                next_state.update_literal();
+            self.ensure_capacity_for_pos(current_node_idx + rep_len as usize);
 
-                // Rep0
-                let next_pos_state = (pos + len + 1) & self.pos_mask;
-                price +=
-                    price_calc.get_long_rep_and_len_price(0, len2, &next_state, next_pos_state);
+            let rep_price = any_rep_price.get_long_rep_price(rep_id as u32);
 
-                let i = self.opt_cur + len as usize + 1 + len2 as usize;
-                while self.opt_end < i {
-                    self.opt_end += 1;
-                    self.opts[self.opt_end].reset();
+            // Try the prices of all lengths of this rep
+            for rep_len in (MATCH_LEN_MIN as u32)..=rep_len {
+                let price_rep = price + rep_price.get_price_with_len(rep_len);
+
+                let index = current_node_idx + rep_len as usize;
+                let next_node = &mut self.node_graph[index];
+
+                if next_node.price > price_rep {
+                    *next_node = node.add_long_rep(price_rep, rep_id, rep_len);
                 }
-                if price < self.opts[i].price {
-                    self.opts[i].set3(
-                        price,
-                        self.opt_cur,
-                        dist as i32 + REPS as i32,
-                        len as usize,
-                        0,
-                    );
+            }
+        }
+    }
+
+    /// Try:
+    /// - All matches
+    fn try_matches(
+        &mut self,
+        input: &mut LZMAEncoderInput<impl MatchFinder>,
+        normal_match_price: NormalMatchPrice,
+    ) {
+        let current_node_idx = self.get_curr_node_index(input);
+        let node = self.node_graph[current_node_idx];
+        let price = node.price;
+
+        let matches = input.calc_matches();
+
+        for match_ in matches {
+            if node.state.reps().contains(&match_.distance) {
+                // If we've already checked this as a rep, skip it.
+                continue;
+            }
+
+            self.ensure_capacity_for_pos(current_node_idx + match_.len as usize);
+
+            for match_len in (MATCH_LEN_MIN as u32)..=match_.len {
+                let price_rep =
+                    price + normal_match_price.get_price_with_dist_len(match_.distance, match_len);
+
+                let index = current_node_idx + match_len as usize;
+                let next_node = &mut self.node_graph[index];
+
+                if next_node.price > price_rep {
+                    *next_node = node.add_match(price_rep, match_len, match_.distance);
+                }
+            }
+        }
+    }
+
+    fn convert_graph_into_instructions(&mut self) {
+        let mut pos = self.node_graph.len() - 1;
+
+        while pos != 0 {
+            let node = self.node_graph[pos];
+
+            match node.instruction {
+                NodeInstruction::None => {
+                    unreachable!();
+                }
+                NodeInstruction::Literal { ctx } => {
+                    let instruction = EncodeInstruction::Literal(ctx);
+                    self.instruction_cache_stack.push(instruction);
+                }
+                NodeInstruction::Rep { rep_index } => {
+                    let instruction = EncodeInstruction::Rep {
+                        rep_index,
+                        len: node.len,
+                    };
+                    self.instruction_cache_stack.push(instruction);
+                }
+                NodeInstruction::Match { distance } => {
+                    let instruction = EncodeInstruction::Match(Match {
+                        distance,
+                        len: node.len,
+                    });
+                    self.instruction_cache_stack.push(instruction);
+                }
+                NodeInstruction::LiteralThenRep0 { literal_ctx } => {
+                    // Add them in reverse as it's a stack
+                    let instruction = EncodeInstruction::Rep {
+                        rep_index: 0,
+                        len: node.len - 1,
+                    };
+                    self.instruction_cache_stack.push(instruction);
+
+                    let instruction = EncodeInstruction::Literal(literal_ctx);
+                    self.instruction_cache_stack.push(instruction);
                 }
             }
 
-            match_ += 1;
-            if match_ == matches.len() as usize {
-                break;
-            }
-            len += 1;
+            pos -= node.len as usize;
         }
     }
 }
@@ -446,349 +276,156 @@ impl LZMAInstructionPicker for LZMANormalInstructionPicker {
         &mut self,
         input: &mut LZMAEncoderInput<impl MatchFinder>,
         price_calc: &mut EncoderPriceCalc,
-        state: &LZMACodec,
+        state: &State,
     ) -> EncodeInstruction {
-        let mut back = 0;
-
-        // If there are pending symbols from an earlier call to this
-        // function, return those symbols first.
-        if self.opt_cur < self.opt_end {
-            let len = self.opts[self.opt_cur].opt_prev as i32 - self.opt_cur as i32;
-            self.opt_cur = self.opts[self.opt_cur].opt_prev;
-            back = self.opts[self.opt_cur].back_prev;
-            assert!(len >= 0);
-
-            if back == -1 {
-                return EncodeInstruction::Literal;
-            } else if back < REPS as i32 {
-                return EncodeInstruction::Rep {
-                    rep_index: back as usize,
-                    len: len as u32,
-                };
-            } else {
-                return EncodeInstruction::Match(Match {
-                    distance: back as u32 - REPS as u32,
-                    len: len as u32,
-                });
-            }
+        if let Some(instruction) = self.instruction_cache_stack.pop() {
+            return instruction;
         }
 
-        assert_eq!(self.opt_cur, self.opt_end);
-        self.opt_cur = 0;
-        self.opt_end = 0;
-        back = -1;
+        let avail = usize::min(input.forward_bytes(), MATCH_LEN_MAX) as u32;
 
-        // Get the number of bytes available in the dictionary, but
-        // not more than the maximum match length. If there aren't
-        // enough bytes remaining to encode a match at all, return
-        // immediately to encode this byte as a literal.
-        let mut avail = i32::min(input.forward_bytes() as i32, MATCH_LEN_MAX as i32);
-        if avail < MATCH_LEN_MIN as i32 {
-            return EncodeInstruction::Literal;
-        }
-        // Get the lengths of repeated matches.
-        let mut rep_best = 0;
-        let mut rep_lens = [0; REPS];
-        for rep in 0..REPS {
-            rep_lens[rep] = input
-                .buffer()
-                .get_match_length(0, state.reps[rep], avail as u32)
-                as i32;
-
-            if rep_lens[rep] < MATCH_LEN_MIN as i32 {
-                rep_lens[rep] = 0;
-                continue;
-            }
-
-            if rep_lens[rep] > rep_lens[rep_best] {
-                rep_best = rep;
-            }
-        }
-
-        // Return if the best repeated match is at least niceLen bytes long.
-        if rep_lens[rep_best] >= self.nice_len as i32 {
-            return EncodeInstruction::Rep {
-                rep_index: rep_best as usize,
-                len: rep_lens[rep_best] as u32,
-            };
-        }
-
-        // Initialize mainLen and mainDist to the longest match found
-        // by the match finder.
-        let mut main_len = 0;
-        let main_dist;
-        let matches = input.calc_matches();
-        if matches.len() > 0 {
-            let last = matches.last().unwrap();
-            main_len = last.len;
-            main_dist = last.distance;
-
-            // Return if it is at least niceLen bytes long.
-            if main_len >= self.nice_len {
-                return EncodeInstruction::Match(Match {
-                    distance: main_dist,
-                    len: main_len,
-                });
-            }
-        }
-
-        let cur_byte = input.buffer().get_byte(0);
-        let match_byte = input.buffer().get_byte(-(state.reps[0] as i32) - 1);
-
-        // If the match finder found no matches and this byte cannot be
-        // encoded as a repeated match (short or long), we must be return
-        // to have the byte encoded as a literal.
-        if main_len < MATCH_LEN_MIN as u32
-            && cur_byte != match_byte
-            && rep_lens[rep_best] < MATCH_LEN_MIN as i32
-        {
-            return EncodeInstruction::Literal;
-        }
-
-        let mut pos = input.pos() as u32;
-        let mut pos_state = pos & self.pos_mask;
-
-        // Calculate the price of encoding the current byte as a literal.
-        {
+        if avail < MATCH_LEN_MIN as u32 {
+            // Just return a literal
+            let next_byte = input.buffer().get_byte(0);
             let prev_byte = input.buffer().get_byte(-1);
-            let literal_price =
-                price_calc.get_literal_price(cur_byte, match_byte, prev_byte, pos, &state.state);
-            self.opts[1].set1(literal_price, 0, -1);
-        }
-
-        let mut any_match_price = price_calc.get_any_match_price(&state.state, pos_state);
-        let mut any_rep_price = price_calc.get_any_rep_price(any_match_price, &state.state);
-
-        // If it is possible to encode this byte as a short rep, see if
-        // it is cheaper than encoding it as a literal.
-        if match_byte == cur_byte {
-            let short_rep_price =
-                price_calc.get_short_rep_price(any_rep_price, &state.state, pos_state);
-            if short_rep_price < self.opts[1].price {
-                self.opts[1].set1(short_rep_price, 0, 0);
-            }
-        }
-
-        // Return if there is neither normal nor long repeated match. Use
-        // a short match instead of a literal if it is possible and cheaper.
-        self.opt_end = usize::max(main_len as usize, rep_lens[rep_best] as usize);
-        if self.opt_end < MATCH_LEN_MIN {
-            assert_eq!(self.opt_end, 0);
-            let back = self.opts[1].back_prev;
-            if back == -1 {
-                return EncodeInstruction::Literal;
-            } else {
-                let rep_index = self.opts[1].back_prev as usize;
-                return EncodeInstruction::Rep { rep_index, len: 1 };
-            }
-        }
-
-        // Update the lookup tables for distances and lengths before using
-        // those price calculation functions. (The price function above
-        // don't need these tables.)
-        price_calc.update_prices();
-
-        // Initialize the state and reps of this position in opts[].
-        // updateOptStateAndReps() will need these to get the new
-        // state and reps for the next byte.
-        self.opts[0].state.set(state.state);
-        self.opts[0].reps = state.reps;
-
-        // Initialize the prices for latter opts that will be used below.
-        for i in (MATCH_LEN_MIN..=self.opt_end).rev() {
-            self.opts[i].reset();
-        }
-
-        // Calculate the prices of repeated matches of all lengths.
-        for rep in 0..REPS {
-            let rep_len = rep_lens[rep];
-            if rep_len < MATCH_LEN_MIN as i32 {
-                continue;
-            }
-            let long_rep_price =
-                price_calc.get_long_rep_price(any_rep_price, rep as _, &state.state, pos_state);
-            let mut rep_len = rep_len as usize;
-            loop {
-                let price =
-                    long_rep_price + price_calc.get_rep_len_price(rep_len as _, pos_state as _);
-                if price < self.opts[rep_len].price {
-                    self.opts[rep_len].set1(price, 0, rep as _);
-                }
-                rep_len -= 1;
-                if rep_len < MATCH_LEN_MIN {
-                    break;
-                }
-            }
-        }
-
-        // Calculate the prices of normal matches that are longer than rep0.
-        {
-            let matches = input.calc_matches();
-            let mut len = i32::max(rep_lens[0] + 1, MATCH_LEN_MIN as i32);
-            if len <= main_len as i32 {
-                let normal_match_price =
-                    price_calc.get_normal_match_price(any_match_price, &state.state);
-
-                // Set i to the index of the shortest match that is
-                // at least len bytes long.
-                let mut i = 0;
-                while len > matches[i].len as i32 {
-                    i += 1;
-                }
-
-                loop {
-                    let dist = matches[i].distance;
-                    let price = price_calc.get_match_and_len_price(
-                        normal_match_price,
-                        dist as _,
-                        len as _,
-                        pos_state,
-                    );
-                    if price < self.opts[len as usize].price {
-                        self.opts[len as usize].set1(price, 0, dist as i32 + REPS as i32);
-                    }
-                    if len == matches[i].len as i32 {
-                        i += 1;
-                        if i == matches.len() {
-                            break;
-                        }
-                    }
-                    len += 1;
-                }
-            }
-        }
-
-        avail = i32::min(input.forward_bytes() as i32, Self::OPTS as i32 - 1);
-
-        // Get matches for later bytes and optimize the use of LZMA symbols
-        // by calculating the prices and picking the cheapest symbol
-        // combinations.
-        while {
-            self.opt_cur += 1;
-            self.opt_cur < self.opt_end
-        } {
-            input.increment_pos();
-            let matches = input.calc_matches();
-            if matches.len() > 0 && matches.last().unwrap().len >= self.nice_len as u32 {
-                break;
-            }
-
-            avail -= 1;
-            pos += 1;
-            pos_state = pos & self.pos_mask;
-
-            if avail == 0 {
-                break;
-            }
-
-            self.update_opt_state_and_reps();
-            any_match_price = self.opts[self.opt_cur].price
-                + price_calc.get_any_match_price(&self.opts[self.opt_cur].state, pos_state);
-            any_rep_price =
-                price_calc.get_any_rep_price(any_match_price, &self.opts[self.opt_cur].state);
-
-            self.calc1_byte_prices(
-                input,
-                &price_calc,
-                pos,
-                pos_state,
-                avail as _,
-                any_rep_price,
-            );
-
-            if avail >= MATCH_LEN_MIN as i32 {
-                let start_len = self.calc_long_rep_prices(
-                    input,
-                    &price_calc,
-                    pos,
-                    pos_state,
-                    avail as _,
-                    any_rep_price,
-                );
-                let matches = input.calc_matches();
-                if matches.len() > 0 {
-                    self.calc_normal_match_prices(
-                        input,
-                        &price_calc,
-                        pos,
-                        pos_state,
-                        avail as _,
-                        any_match_price,
-                        start_len as _,
-                    );
-                }
-            }
-        }
-
-        let len = self.convert_opts(&mut back) as u32;
-        if back == -1 {
-            return EncodeInstruction::Literal;
-        } else if back < REPS as i32 {
-            return EncodeInstruction::Rep {
-                rep_index: back as usize,
-                len,
+            let match_byte = input.buffer().get_byte(-(state.reps()[0] as i32) - 1);
+            let literal_ctx = LiteralCtx {
+                byte: next_byte,
+                match_byte,
+                prev_byte,
             };
-        } else {
-            return EncodeInstruction::Match(Match {
-                distance: back as u32 - REPS as u32,
-                len,
-            });
+
+            return EncodeInstruction::Literal(literal_ctx);
         }
+
+        self.reset_and_prepare_graph(input, *state);
+
+        while self.node_graph.len() < MAX_NODE_GRAPH_LEN
+            && self.get_curr_node_index(input) < self.node_graph.len()
+            && input.forward_bytes() > 0
+        {
+            let pos = input.pos();
+            let pos_state = pos as u32 & self.pos_mask;
+
+            let any_match_price = price_calc.get_any_match_price(state, pos_state);
+            let any_rep_price = any_match_price.get_any_rep_price();
+            let normal_match_price = any_match_price.get_normal_match_price();
+
+            self.try_one_length_opts(input, price_calc, any_rep_price);
+            self.try_reps(input, any_rep_price);
+            self.try_matches(input, normal_match_price);
+
+            input.increment_pos();
+        }
+
+        self.convert_graph_into_instructions();
+
+        return self.instruction_cache_stack.pop().unwrap();
     }
 }
 
-const REPS: usize = 4;
+#[derive(Debug, Clone, Copy)]
+enum NodeInstruction {
+    None,
+    Match { distance: u32 },
+    Rep { rep_index: usize },
+    Literal { ctx: LiteralCtx },
 
-#[derive(Debug, Default, Clone)]
-struct Optimum {
+    // This is a very common case so we include it as its own instruction.
+    // The rep length is len - 1.
+    LiteralThenRep0 { literal_ctx: LiteralCtx },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PriceNode {
+    instruction: NodeInstruction,
     state: State,
-    reps: [u32; REPS],
+    len: u32,
 
     price: RangeEncPrice,
-    opt_prev: usize,
-    back_prev: i32,
-    prev1_is_literal: bool,
-
-    has_prev2: bool,
-    opt_prev2: usize,
-    back_prev2: i32,
 }
 
-impl Optimum {
-    fn reset(&mut self) {
-        // TODO: Refactor this to be more atomic
-        self.price = RangeEncPrice::infinity();
+impl PriceNode {
+    pub fn none() -> Self {
+        Self {
+            instruction: NodeInstruction::None,
+            state: State::new(),
+            len: 0,
+            price: RangeEncPrice::infinity(),
+        }
     }
 
-    fn set1(&mut self, new_price: RangeEncPrice, opt_cur: usize, back: i32) {
-        self.price = new_price;
-        self.opt_prev = opt_cur;
-        self.back_prev = back;
-        self.prev1_is_literal = false;
+    pub fn initial(state: State) -> Self {
+        Self {
+            instruction: NodeInstruction::None, // Some default value, won't be used
+            state,
+            len: 0,
+            price: RangeEncPrice::zero(),
+        }
     }
 
-    fn set2(&mut self, new_price: RangeEncPrice, opt_cur: usize, back: i32) {
-        self.price = new_price;
-        self.opt_prev = opt_cur + 1;
-        self.back_prev = back;
-        self.prev1_is_literal = true;
-        self.has_prev2 = false;
+    #[inline(always)]
+    pub fn add_literal(&self, price: RangeEncPrice, ctx: LiteralCtx) -> Self {
+        let mut new_state = self.state;
+        new_state.update_literal();
+        Self {
+            instruction: NodeInstruction::Literal { ctx },
+            state: new_state,
+            len: 1,
+            price,
+        }
     }
 
-    fn set3(
-        &mut self,
-        new_price: RangeEncPrice,
-        opt_cur: usize,
-        back2: i32,
-        len2: usize,
-        back: i32,
-    ) {
-        self.price = new_price;
-        self.opt_prev = opt_cur + len2 + 1;
-        self.back_prev = back;
-        self.prev1_is_literal = true;
-        self.has_prev2 = true;
-        self.opt_prev2 = opt_cur;
-        self.back_prev2 = back2;
+    #[inline(always)]
+    pub fn add_short_rep(&self, price: RangeEncPrice) -> Self {
+        let mut new_state = self.state;
+        new_state.update_short_rep();
+        Self {
+            instruction: NodeInstruction::Rep { rep_index: 0 },
+            state: new_state,
+            len: 1,
+            price,
+        }
+    }
+
+    #[inline(always)]
+    pub fn add_long_rep(&self, price: RangeEncPrice, rep: usize, len: u32) -> Self {
+        let mut new_state = self.state;
+        new_state.update_long_rep(rep);
+        Self {
+            instruction: NodeInstruction::Rep { rep_index: rep },
+            state: new_state,
+            len,
+            price,
+        }
+    }
+
+    #[inline(always)]
+    pub fn add_match(&self, price: RangeEncPrice, len: u32, distance: u32) -> Self {
+        let mut new_state = self.state;
+        new_state.update_match(distance);
+        Self {
+            instruction: NodeInstruction::Match { distance },
+            state: new_state,
+            len,
+            price,
+        }
+    }
+
+    pub fn add_lit_rep0(
+        &self,
+        price: RangeEncPrice,
+        literal_ctx: LiteralCtx,
+        long_rep_len: u32,
+    ) -> Self {
+        let mut new_state = self.state;
+        new_state.update_literal();
+        new_state.update_long_rep(0);
+        Self {
+            instruction: NodeInstruction::LiteralThenRep0 { literal_ctx },
+            state: new_state,
+            len: long_rep_len + 1,
+            price,
+        }
     }
 }

@@ -6,12 +6,19 @@ use super::data_buffers::EncoderDataBuffer;
 
 pub mod instructions_fast;
 // pub mod instructions_normal;
-// pub mod instructions_normal2;
+pub mod instructions_normal;
 pub mod match_finding;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiteralCtx {
+    pub byte: u8,
+    pub prev_byte: u8,
+    pub match_byte: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncodeInstruction {
-    Literal,
+    Literal(LiteralCtx),
     Rep { rep_index: usize, len: u32 },
     Match(Match),
 }
@@ -19,7 +26,7 @@ pub enum EncodeInstruction {
 impl EncodeInstruction {
     pub fn length(&self) -> u32 {
         match *self {
-            EncodeInstruction::Literal => 1,
+            EncodeInstruction::Literal { .. } => 1,
             EncodeInstruction::Match(match_) => match_.len,
             EncodeInstruction::Rep { len, .. } => len,
         }
